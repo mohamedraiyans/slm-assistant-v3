@@ -1,0 +1,193 @@
+====================================================================
+ HOW TO RUN SLM ASSISTANT v3  (read this top to bottom, in order)
+====================================================================
+
+This project currently has these pieces:
+
+  1. Database    (Postgres, runs inside Docker)
+  2. Redis       (reserved for Phase 7 rate-limiting, runs inside Docker,
+                  nothing uses it yet)
+  3. Vector DB   (Chroma, runs inside Docker)
+  4. Adminer     (Postgres web UI, runs inside Docker) -> http://localhost:8081
+  5. Backend     (NestJS, TypeScript)          -> http://localhost:4000
+  6. Frontend    (Next.js App Router)          -> http://localhost:3000
+
+Both the backend and frontend run on your host machine via Turborepo
+(`turbo dev`), NOT inside Docker. Only the four services above run in
+Docker. Phase 3 of the roadmap will containerize the app itself and
+move everything to Kubernetes — until then, this is the setup.
+
+Progress so far (see the full roadmap at
+C:\Users\Raiyan\.claude\plans\indexed-whistling-teacup.md):
+  Phase 0 - Turborepo scaffold                          DONE
+  Phase 1 - Google login, RBAC, Postgres, key vault      DONE
+  Phase 2 - LangChain RAG: upload + chat dashboard       DONE
+  Phase 3 - Kubernetes (local kind/minikube)             NOT STARTED
+  Phase 4 - Quiz/Exam feature                            NOT STARTED
+  Phase 5-8 - see roadmap                                NOT STARTED
+
+--------------------------------------------------------------------
+ ONE .env FILE, AT THE PROJECT ROOT
+--------------------------------------------------------------------
+There is exactly one `.env` file, in the project root (slm-assistant-v3/.env),
+gitignored. Both `docker-compose.yml` and `apps/api` read from it (the api
+loads it explicitly via `apps/api/prisma.config.ts` and `app.module.ts`,
+since its working directory is `apps/api`, two levels below root).
+
+`apps/web` is the one exception: Next.js only reads `apps/web/.env.local`
+(not the root file), and it only needs one variable —
+`NEXT_PUBLIC_API_URL=http://localhost:4000` — which is already there.
+
+.env is already filled in with working local values EXCEPT the Google
+OAuth client, which is already set up too (see Part F) — there is
+nothing left to fill in for local dev.
+
+--------------------------------------------------------------------
+ PART A - FIRST TIME ONLY (already done on this machine)
+--------------------------------------------------------------------
+
+A1. Install Docker Desktop, open it, wait for it to fully start.
+A2. From the project root: `npm install` (installs all three
+    workspaces: apps/api, apps/web, packages/shared-types).
+A3. `docker compose up -d`
+A4. `cd apps/api && npx prisma migrate dev` (creates/updates tables)
+
+That's it for one-time setup. From now on, every session, you only
+need Part B.
+
+--------------------------------------------------------------------
+ PART B - EVERY TIME YOU WANT TO WORK ON THE PROJECT
+--------------------------------------------------------------------
+
+One terminal, from the project root:
+
+      docker compose up -d
+      npx turbo run dev
+
+This starts postgres/redis/chroma/adminer (Docker, `unless-stopped` —
+they usually auto-start with Docker Desktop after a reboot, but
+running this is harmless either way) and both apps/api (port 4000)
+and apps/web (port 3000) via Turborepo.
+
+Give the api ~60-90 seconds the first time — it type-checks the whole
+LangChain dependency tree, which is slow. Watch the terminal for:
+
+      [Nest] ... LOG [NestApplication] Nest application successfully started
+
+Then open http://localhost:3000 — you'll be redirected to /login if
+you're not already signed in.
+
+--------------------------------------------------------------------
+ PART C - HOW TO STOP EVERYTHING
+--------------------------------------------------------------------
+
+Ctrl+C the `turbo run dev` terminal to stop api/web.
+
+      docker compose stop
+
+Stops the Docker containers but keeps all data (Postgres rows,
+Chroma vectors). Next time, `docker compose up -d` again — no need to
+redo migrations.
+
+To fully wipe the database and vector store and start clean (rarely
+needed): `docker compose down -v`
+
+--------------------------------------------------------------------
+ PART D - IF YOU CHANGE apps/api/prisma/schema.prisma
+--------------------------------------------------------------------
+
+      cd apps/api
+      npx prisma migrate dev --name describe_your_change
+
+Always glance at the generated migration file in
+apps/api/prisma/migrations/ before trusting it — autogenerate is good
+but not perfect.
+
+--------------------------------------------------------------------
+ PART E - VIEWING THE DATABASE IN A BROWSER (Adminer)
+--------------------------------------------------------------------
+
+Like phpMyAdmin, but for Postgres. `docker compose up -d` already
+starts it (it's just another service in docker-compose.yml, no
+separate setup needed — unlike the old DropshipAI project where it
+was a manually-run container).
+
+Open http://localhost:8081 and log in with:
+
+    System:    PostgreSQL
+    Server:    postgres
+    Username:  slm
+    Password:  slm
+    Database:  slm
+
+--------------------------------------------------------------------
+ PART F - GOOGLE SIGN-IN (already configured, for reference only)
+--------------------------------------------------------------------
+
+Uses its own dedicated Google Cloud project ("slm-assistant",
+project ID slm-assistant-503922) — NOT shared with any other project.
+OAuth client type: Web application, redirect URI already registered:
+      http://localhost:4000/auth/google/callback
+
+.env already has the real GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET.
+Nothing to do here unless the secret is ever rotated — then update
+.env and restart the api.
+
+The first admin is bootstrapped via `ADMIN_EMAILS` in .env (comma-
+separated Google account emails). Whichever of those emails logs in
+first is auto-promoted to ADMIN — no manual DB edit needed. Everyone
+else who logs in becomes a regular USER.
+
+--------------------------------------------------------------------
+ PART G - ADDING AN LLM PROVIDER KEY (admin only)
+--------------------------------------------------------------------
+
+Log in as an ADMIN -> click "Provider keys" on the dashboard (or go to
+/admin/providers) -> pick a provider (GROQ / AZURE_OPENAI / ANTHROPIC),
+give it a label, paste the real key -> Add key. Keys are encrypted
+(AES-256-GCM) before they ever touch Postgres — verified by inspecting
+the raw DB row during Phase 1 testing. Regular users just see a
+provider dropdown in the chat panel populated from whatever admins
+have added; they never see the raw keys.
+
+--------------------------------------------------------------------
+ PART H - KNOWN GOTCHAS HIT DURING DEVELOPMENT (fixed, but good to know)
+--------------------------------------------------------------------
+
+- The local embedding model (Xenova/all-MiniLM-L6-v2, used to embed
+  uploaded documents for Chroma) downloads once on first use to
+  node_modules/@huggingface/transformers/.cache/. If that download
+  ever gets interrupted (laptop sleep/shutdown, flaky network), you'll
+  see "Protobuf parsing failed" on upload. Fix: delete
+  node_modules/@huggingface/transformers/.cache/ and retry the upload
+  — it re-downloads (~90MB) automatically.
+
+- Uploaded documents are stored on disk at apps/api/data/docs/, which
+  is excluded from the TypeScript watcher (apps/api/tsconfig.build.json
+  "exclude") — this was a real bug earlier (every upload was triggering
+  a dev-server restart that killed the upload's own request). If you
+  ever add another runtime-writable directory under apps/api, exclude
+  it the same way.
+
+- Access tokens (httpOnly cookie) last 60 minutes. If you get bounced
+  back to /login unexpectedly, that's just the session expiring — sign
+  in again, it's instant since Google still remembers you.
+
+--------------------------------------------------------------------
+ QUICK REFERENCE - command-only cheat sheet
+--------------------------------------------------------------------
+
+  Start everything:         docker compose up -d && npx turbo run dev
+  Stop data services:       docker compose stop
+  Wipe DB + vectors:        docker compose down -v
+  Run a migration:          cd apps/api && npx prisma migrate dev
+  Type-check api:           cd apps/api && npx nest build
+  Type-check web:           cd apps/web && npx tsc --noEmit
+  App:                      http://localhost:3000
+  API:                      http://localhost:4000
+  API health check:         http://localhost:4000/health
+  Chroma:                   http://localhost:8000
+  Adminer (DB browser):     http://localhost:8081
+  Postgres (psql via Docker): docker compose exec postgres psql -U slm -d slm
+
+====================================================================
