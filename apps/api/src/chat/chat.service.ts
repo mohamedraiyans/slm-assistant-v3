@@ -1,0 +1,44 @@
+import { Injectable } from '@nestjs/common';
+import { HumanMessage, SystemMessage } from '@langchain/core/messages';
+import type { ProviderName } from '@slm/shared-types';
+import { VectorStoreService, type VectorMatch } from '../documents/vector-store.service';
+import { MemoryService } from './memory.service';
+import { ProviderFactory } from './provider-factory.service';
+
+const SYSTEM_PROMPT =
+  "You are a helpful assistant answering questions using the company's knowledge base. " +
+  'Use the provided context to answer naturally and confidently, handling synonyms and ' +
+  "paraphrased questions. If the answer isn't in the context, say so clearly.";
+
+export interface ChatResult {
+  answer: string;
+  sources: VectorMatch[];
+}
+
+@Injectable()
+export class ChatService {
+  constructor(
+    private readonly vectorStore: VectorStoreService,
+    private readonly providerFactory: ProviderFactory,
+    private readonly memory: MemoryService,
+  ) {}
+
+  async handleChat(userId: string, question: string, provider: ProviderName): Promise<ChatResult> {
+    this.memory.save(userId, 'user', question);
+
+    const matches = await this.vectorStore.query(question, 5);
+    const context = matches.length
+      ? matches.map((m) => `[${m.filename}] ${m.text}`).join('\n\n')
+      : 'No relevant information found in the knowledge base.';
+
+    const model = await this.providerFactory.build(provider);
+    const response = await model.invoke([
+      new SystemMessage(SYSTEM_PROMPT),
+      new HumanMessage(`Context:\n${context}\n\nQuestion: ${question}`),
+    ]);
+    const answer = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
+
+    this.memory.save(userId, 'assistant', answer);
+    return { answer, sources: matches };
+  }
+}
