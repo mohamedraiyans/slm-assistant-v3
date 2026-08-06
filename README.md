@@ -67,6 +67,7 @@ slm-assistant-v3/
 - Admins add API keys for Groq, Azure OpenAI, or Anthropic from `/admin/providers`
 - Keys are encrypted with AES-256-GCM before they touch Postgres
 - Regular users only ever see a provider dropdown — never raw keys
+- Currently configured and active: **Groq** and **Azure OpenAI**
 
 **Document ingestion & retrieval**
 - Upload PDF or DOCX files; parsed via `pdf-parse` / `mammoth`
