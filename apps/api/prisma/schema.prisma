@@ -1,0 +1,68 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  USER
+}
+
+enum ProviderName {
+  GROQ
+  AZURE_OPENAI
+  ANTHROPIC
+}
+
+model User {
+  id             String          @id @default(uuid())
+  email          String          @unique
+  name           String?
+  avatarUrl      String?
+  role           Role            @default(USER)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  refreshTokens  RefreshToken[]
+  providerKeys   ProviderCredential[]
+  documents      Document[]
+}
+
+model Document {
+  id           String   @id @default(uuid())
+  filename     String   @unique
+  chunkCount   Int
+  uploadedBy   String
+  uploader     User     @relation(fields: [uploadedBy], references: [id])
+  createdAt    DateTime @default(now())
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model ProviderCredential {
+  id             String       @id @default(uuid())
+  provider       ProviderName
+  label          String
+  encryptedValue String
+  extraConfig    Json?
+  isActive       Boolean      @default(true)
+  createdBy      String
+  creator        User         @relation(fields: [createdBy], references: [id])
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([provider])
+}
