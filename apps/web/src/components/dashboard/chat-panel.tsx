@@ -12,7 +12,20 @@ interface ChatTurn {
   content: string;
   sources?: ChatSourceMatch[];
   cached?: boolean;
+  provider?: ProviderName;
 }
+
+const PROVIDER_LABELS: Record<ProviderName, string> = {
+  GROQ: "Groq AI",
+  AZURE_OPENAI: "Azure OpenAI",
+  ANTHROPIC: "Anthropic",
+};
+
+const PROVIDER_LABEL_CLASSES: Record<ProviderName, string> = {
+  GROQ: "text-emerald-400",
+  AZURE_OPENAI: "text-sky-400",
+  ANTHROPIC: "text-purple-400",
+};
 
 interface ChatPanelProps {
   providers: ProviderName[];
@@ -120,7 +133,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
     const data: { response: string; sources: ChatSourceMatch[]; cached: boolean } = await res.json();
     setMessages((prev) => [
       ...prev,
-      { role: "assistant", content: data.response, sources: data.sources, cached: data.cached },
+      { role: "assistant", content: data.response, sources: data.sources, cached: data.cached, provider },
     ]);
     loadUsage();
   }
@@ -194,6 +207,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
               }`}
             >
               {turn.content}
+              {turn.provider && (
+                <span className={`ml-2 text-xs font-normal ${PROVIDER_LABEL_CLASSES[turn.provider]}`}>
+                  ({PROVIDER_LABELS[turn.provider]})
+                </span>
+              )}
               {turn.cached && (
                 <span className="ml-2 text-xs font-normal text-amber-400" title="Served instantly from cache">
                   ⚡ cached
