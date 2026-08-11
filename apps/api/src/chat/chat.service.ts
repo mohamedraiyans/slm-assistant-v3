@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import type { ProviderName } from '@slm/shared-types';
 import { VectorStoreService, type VectorMatch } from '../documents/vector-store.service';
+import { FaqService } from '../faq/faq.service';
 import { MemoryService } from './memory.service';
 import { ProviderFactory } from './provider-factory.service';
 
@@ -13,6 +14,7 @@ const SYSTEM_PROMPT =
 export interface ChatResult {
   answer: string;
   sources: VectorMatch[];
+  cached: boolean;
 }
 
 @Injectable()
@@ -21,10 +23,20 @@ export class ChatService {
     private readonly vectorStore: VectorStoreService,
     private readonly providerFactory: ProviderFactory,
     private readonly memory: MemoryService,
+    private readonly faq: FaqService,
   ) {}
 
   async handleChat(userId: string, question: string, provider: ProviderName): Promise<ChatResult> {
     this.memory.save(userId, 'user', question);
+    // Frequency is tracked regardless of provider or cache outcome, since it's the
+    // question itself that's "frequently asked", not any one provider's answer to it.
+    void this.faq.recordQuestion(question);
+
+    const cached = await this.faq.getCachedAnswer(provider, question);
+    if (cached) {
+      this.memory.save(userId, 'assistant', cached.answer);
+      return { answer: cached.answer, sources: cached.sources, cached: true };
+    }
 
     const matches = await this.vectorStore.query(question, 5);
     const context = matches.length
@@ -39,6 +51,7 @@ export class ChatService {
     const answer = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
 
     this.memory.save(userId, 'assistant', answer);
-    return { answer, sources: matches };
+    await this.faq.setCachedAnswer(provider, question, { answer, sources: matches });
+    return { answer, sources: matches, cached: false };
   }
 }

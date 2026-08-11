@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useState, type FormEvent } from "react";
 import type { ChatSourceMatch, ProviderName, ProviderUsageSnapshot, ProviderUsageWindow } from "@slm/shared-types";
 import { Button } from "@/components/ui/button";
 
@@ -11,10 +11,15 @@ interface ChatTurn {
   role: "user" | "assistant";
   content: string;
   sources?: ChatSourceMatch[];
+  cached?: boolean;
 }
 
 interface ChatPanelProps {
   providers: ProviderName[];
+}
+
+export interface ChatPanelHandle {
+  ask: (question: string) => void;
 }
 
 function scoreClass(score: number): string {
@@ -59,7 +64,10 @@ function usageTooltip(snapshot: ProviderUsageSnapshot): string {
   return parts.length > 0 ? parts.join(" · ") : "No usage data yet";
 }
 
-export function ChatPanel({ providers }: ChatPanelProps) {
+export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function ChatPanel(
+  { providers },
+  ref,
+) {
   const [provider, setProvider] = useState<ProviderName | undefined>(providers[0]);
   const [messages, setMessages] = useState<ChatTurn[]>([]);
   const [input, setInput] = useState("");
@@ -88,13 +96,10 @@ export function ChatPanel({ providers }: ChatPanelProps) {
     return () => clearInterval(interval);
   }, []);
 
-  async function handleSend(event: FormEvent) {
-    event.preventDefault();
-    const question = input.trim();
+  async function sendQuestion(question: string) {
     if (!question || loading) return;
 
     setMessages((prev) => [...prev, { role: "user", content: question }]);
-    setInput("");
     setLoading(true);
     setError(null);
 
@@ -112,9 +117,23 @@ export function ChatPanel({ providers }: ChatPanelProps) {
       return;
     }
 
-    const data: { response: string; sources: ChatSourceMatch[] } = await res.json();
-    setMessages((prev) => [...prev, { role: "assistant", content: data.response, sources: data.sources }]);
+    const data: { response: string; sources: ChatSourceMatch[]; cached: boolean } = await res.json();
+    setMessages((prev) => [
+      ...prev,
+      { role: "assistant", content: data.response, sources: data.sources, cached: data.cached },
+    ]);
     loadUsage();
+  }
+
+  useImperativeHandle(ref, () => ({
+    ask: (question: string) => void sendQuestion(question),
+  }));
+
+  async function handleSend(event: FormEvent) {
+    event.preventDefault();
+    const question = input.trim();
+    setInput("");
+    void sendQuestion(question);
   }
 
   async function handleClear() {
@@ -175,6 +194,11 @@ export function ChatPanel({ providers }: ChatPanelProps) {
               }`}
             >
               {turn.content}
+              {turn.cached && (
+                <span className="ml-2 text-xs font-normal text-amber-500" title="Served instantly from cache">
+                  ⚡ cached
+                </span>
+              )}
             </div>
             {turn.sources && turn.sources.length > 0 && (
               <div className="mt-2 flex flex-col gap-1 text-left">
@@ -213,4 +237,4 @@ export function ChatPanel({ providers }: ChatPanelProps) {
       </form>
     </div>
   );
-}
+});

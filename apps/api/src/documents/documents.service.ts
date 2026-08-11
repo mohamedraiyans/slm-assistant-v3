@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import { FaqService } from '../faq/faq.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { chunkDocument } from './document-chunker';
 import { extractText, SUPPORTED_EXTENSIONS } from './document-extractor';
@@ -13,6 +14,7 @@ export class DocumentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly vectorStore: VectorStoreService,
+    private readonly faq: FaqService,
   ) {}
 
   async listDocuments() {
@@ -36,6 +38,7 @@ export class DocumentsService {
       const text = await extractText(filename, buffer);
       const chunks = chunkDocument(filename, text);
       await this.vectorStore.addChunks(chunks);
+      await this.faq.invalidateAll();
 
       return this.prisma.document.upsert({
         where: { filename },
@@ -54,6 +57,7 @@ export class DocumentsService {
     await unlink(destPath).catch(() => undefined);
     await this.vectorStore.deleteDocument(filename);
     await this.prisma.document.deleteMany({ where: { filename } });
+    await this.faq.invalidateAll();
   }
 
   async readDocumentFile(rawFilename: string): Promise<Buffer> {

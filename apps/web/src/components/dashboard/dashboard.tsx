@@ -1,12 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type { AuthUser, DocumentSummary, ProviderName } from "@slm/shared-types";
 import { Button } from "@/components/ui/button";
 import { LogoutButton } from "@/components/logout-button";
 import { Sidebar } from "./sidebar";
-import { ChatPanel } from "./chat-panel";
+import { ChatPanel, type ChatPanelHandle } from "./chat-panel";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
@@ -14,6 +14,7 @@ export function Dashboard({ user }: { user: AuthUser }) {
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
   const [providers, setProviders] = useState<ProviderName[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const chatRef = useRef<ChatPanelHandle>(null);
 
   const refreshDocuments = useCallback(async () => {
     const res = await fetch(`${API_URL}/documents`, { credentials: "include" });
@@ -68,8 +69,12 @@ export function Dashboard({ user }: { user: AuthUser }) {
       )}
 
       <div className="flex min-h-0 flex-1">
-        <Sidebar documents={documents} onChanged={refreshDocuments} />
-        <ChatPanel providers={providers} />
+        <Sidebar
+          documents={documents}
+          onChanged={refreshDocuments}
+          onAskQuestion={(question) => chatRef.current?.ask(question)}
+        />
+        <ChatPanel ref={chatRef} providers={providers} />
       </div>
     </div>
   );

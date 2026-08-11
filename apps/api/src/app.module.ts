@@ -10,6 +10,8 @@ import { QuizModule } from './quiz/quiz.module';
 import { ProvidersModule } from './providers/providers.module';
 import { EvalModule } from './eval/eval.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { RedisModule } from './redis/redis.module';
+import { FaqModule } from './faq/faq.module';
 
 @Module({
   imports: [
@@ -17,6 +19,8 @@ import { PrismaModule } from './prisma/prisma.module';
       isGlobal: true,
       envFilePath: join(process.cwd(), '..', '..', '.env'),
     }),
+    RedisModule,
+    FaqModule,
     PrismaModule,
     HealthModule,
     AuthModule,

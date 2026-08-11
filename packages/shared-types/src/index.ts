@@ -43,6 +43,12 @@ export interface ChatMessage {
   content: string;
 }
 
+export interface FaqEntry {
+  /** Normalized question text (lowercased, trimmed, punctuation-stripped) */
+  question: string;
+  count: number;
+}
+
 export interface ProviderUsageWindow {
   limit: number | null;
   remaining: number | null;

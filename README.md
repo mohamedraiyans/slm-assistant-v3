@@ -20,6 +20,7 @@ multi-tenant architecture with proper auth, RBAC, and a real vector store.
 | Vector store | Chroma (cosine similarity / HNSW) |
 | Embeddings | Local, via `@huggingface/transformers` (Xenova/all-MiniLM-L6-v2) — never leaves the machine |
 | RAG / LLM orchestration | LangChain (`@langchain/core`) as a chat-model abstraction over Groq, Azure OpenAI, and Anthropic |
+| Cache | Redis (`ioredis`) — FAQ answer cache + frequency ranking, see below |
 | Auth | Google OAuth2 (Passport) + JWT (httpOnly cookie), role-based access control |
 | Secrets | AES-256-GCM encrypted provider API keys at rest |
 | Document parsing | `pdf-parse`, `mammoth` (DOCX) |
@@ -39,6 +40,8 @@ slm-assistant-v3/
 │   │       ├── providers/         Encrypted LLM provider key vault (admin)
 │   │       ├── documents/         Upload, parsing, chunking, Chroma vector store
 │   │       ├── chat/              RAG orchestration, per-provider chat model factory
+│   │       ├── faq/               Redis-backed answer cache + question frequency ranking
+│   │       ├── redis/             Global module providing the shared ioredis client
 │   │       ├── quiz/              Scaffolded — not implemented yet
 │   │       ├── eval/              Scaffolded — not implemented yet
 │   │       └── health/            Health check endpoint
@@ -47,7 +50,9 @@ slm-assistant-v3/
 │           ├── app/
 │           │   ├── login/         Google sign-in page
 │           │   └── admin/providers/  Admin UI for managing provider keys
-│           ├── components/dashboard/  Chat panel, sidebar, dashboard shell
+│           ├── components/dashboard/  Chat panel (usage badges, cache
+│           │                          indicator), sidebar (Documents /
+│           │                          Frequently Asked tabs), dashboard shell
 │           └── lib/               API client, auth helpers
 ├── packages/
 │   └── shared-types/               Types shared between api and web (Role,
@@ -81,6 +86,28 @@ slm-assistant-v3/
 - Per-user in-memory conversation history
 - Answers include their source chunks for traceability
 
+**Redis-backed FAQ cache**
+- Every question is normalized (lowercased, trimmed, punctuation stripped) and
+  its frequency tracked in a Redis sorted set — this powers a "Frequently
+  Asked" tab in the sidebar, ranked by how often each question has actually
+  been asked, so the list evolves with real usage instead of being curated
+  by hand
+- Before a chat message touches Chroma or calls out to an LLM provider,
+  `ChatService` checks Redis for a cached answer to that exact
+  (provider, normalized-question) pair. On a hit, the answer returns
+  immediately — **no vector search and no LLM API call**, so repeat questions
+  don't burn Groq/Azure/Anthropic quota at all. The chat UI marks these
+  replies with a `⚡ cached` badge so the effect is visible, not just implied
+- Cached per provider (not globally), since different providers can phrase
+  answers differently — a cached Groq answer is never served for an Azure
+  request
+- Answers carry a 6-hour TTL as a safety net, but the real invalidation path
+  is explicit: uploading or deleting a document bumps a Redis version counter
+  that instantly orphans every previously cached answer (an O(1) bump, not a
+  key scan), so a knowledge-base change can never leave a stale answer live
+- Clicking a question in the "Frequently Asked" tab sends it straight through
+  the normal chat flow, so it's a live shortcut, not just a static list
+
 **Infra**
 - Dockerized local dependencies (Postgres, Redis, Chroma, Adminer)
 - App processes run on the host via Turborepo for fast iteration
@@ -93,7 +120,9 @@ slm-assistant-v3/
   (module scaffolded, not implemented)
 - **Phase 5+ — Evaluation**: automated RAG answer-quality evaluation (module
   scaffolded, not implemented)
-- **Redis-backed rate limiting**: Redis is already provisioned but unused
+- **Redis-backed rate limiting**: Redis is now in active use for the FAQ
+  cache; per-user/per-IP request rate limiting is a separate, still-unused
+  use case for it
 - **Persistent chat history**: current per-user memory is in-process and
   resets on server restart — needs a DB-backed store for multi-session history
 - **Automated tests**: no test suite yet (an earlier Python version had full
