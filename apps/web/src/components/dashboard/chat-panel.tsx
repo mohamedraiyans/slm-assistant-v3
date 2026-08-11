@@ -143,8 +143,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
 
   return (
     <div className="flex min-w-0 flex-1 flex-col bg-background">
-      <div className="flex items-center justify-between border-b border-border p-3">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-y-2 border-b border-border p-3">
+        <div className="flex flex-wrap items-center gap-3">
           <select
             value={provider}
             onChange={(e) => setProvider(e.target.value as ProviderName)}
@@ -158,7 +158,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
               </option>
             ))}
           </select>
-          <div className="flex gap-2 text-xs">
+          <div className="flex flex-wrap gap-2 text-xs">
             {usage.map((snapshot) => {
               const pct = usagePct(snapshot);
               return (

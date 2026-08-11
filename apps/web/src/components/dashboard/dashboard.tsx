@@ -1,10 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import type { AuthUser, DocumentSummary, ProviderName } from "@slm/shared-types";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { LogoutButton } from "@/components/logout-button";
+import { ProviderManager } from "./provider-manager";
+import { UserManager } from "./user-manager";
 import { Sidebar } from "./sidebar";
 import { ChatPanel, type ChatPanelHandle } from "./chat-panel";
 
@@ -14,11 +16,19 @@ export function Dashboard({ user }: { user: AuthUser }) {
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
   const [providers, setProviders] = useState<ProviderName[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [providersOpen, setProvidersOpen] = useState(false);
+  const [usersOpen, setUsersOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const chatRef = useRef<ChatPanelHandle>(null);
 
   const refreshDocuments = useCallback(async () => {
     const res = await fetch(`${API_URL}/documents`, { credentials: "include" });
     if (res.ok) setDocuments(await res.json());
+  }, []);
+
+  const refreshProviders = useCallback(async () => {
+    const res = await fetch(`${API_URL}/providers/available`, { credentials: "include" });
+    if (res.ok) setProviders(await res.json());
   }, []);
 
   useEffect(() => {
@@ -35,30 +45,47 @@ export function Dashboard({ user }: { user: AuthUser }) {
 
   return (
     <div className="flex h-screen flex-col bg-background">
-      <header className="flex items-center justify-between border-b border-border px-4 py-3">
-        <h1 className="text-lg font-semibold tracking-tight">SLM Assistant v3</h1>
-        <div className="flex items-center gap-3 text-sm">
-          <span className="text-muted-foreground">
+      <header className="flex flex-wrap items-center justify-between gap-y-2 border-b border-border px-4 py-3">
+        <div className="flex items-center gap-3">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="md:hidden"
+            onClick={() => setSidebarOpen(true)}
+            aria-label="Open sidebar"
+          >
+            ☰
+          </Button>
+          <h1 className="text-lg font-semibold tracking-tight">SLM Assistant v3</h1>
+        </div>
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <span className="hidden text-muted-foreground sm:inline">
             {user.email} · {user.role}
           </span>
           {user.role === "ADMIN" && (
             <>
-              <Button
-                variant="outline"
-                size="sm"
-                nativeButton={false}
-                render={<Link href="/admin/providers" />}
+              <Dialog
+                open={providersOpen}
+                onOpenChange={(open) => {
+                  setProvidersOpen(open);
+                  if (!open) refreshProviders();
+                }}
               >
-                Provider keys
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                nativeButton={false}
-                render={<Link href="/admin/users" />}
-              >
-                Users
-              </Button>
+                <DialogTrigger render={<Button variant="outline" size="sm" />}>
+                  Provider keys
+                </DialogTrigger>
+                <DialogContent>
+                  <ProviderManager />
+                </DialogContent>
+              </Dialog>
+              <Dialog open={usersOpen} onOpenChange={setUsersOpen}>
+                <DialogTrigger render={<Button variant="outline" size="sm" />}>
+                  Users
+                </DialogTrigger>
+                <DialogContent>
+                  <UserManager currentUserId={user.id} />
+                </DialogContent>
+              </Dialog>
             </>
           )}
           <LogoutButton />
@@ -69,22 +96,37 @@ export function Dashboard({ user }: { user: AuthUser }) {
         <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-300">
           No LLM provider is configured yet.{" "}
           {user.role === "ADMIN" ? (
-            <Link href="/admin/providers" className="underline">
+            <button onClick={() => setProvidersOpen(true)} className="underline">
               Add one
-            </Link>
+            </button>
           ) : (
             "Ask an admin to add one under Provider Keys."
           )}
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1">
-        <Sidebar
-          documents={documents}
-          onChanged={refreshDocuments}
-          onAskQuestion={(question) => chatRef.current?.ask(question)}
-          isAdmin={user.role === "ADMIN"}
-        />
+      <div className="relative flex min-h-0 flex-1">
+        {sidebarOpen && (
+          <div
+            className="fixed inset-0 z-30 bg-black/60 md:hidden"
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
+        <div
+          className={`fixed inset-y-0 left-0 z-40 flex transition-transform duration-200 md:static md:z-auto md:translate-x-0 ${
+            sidebarOpen ? "translate-x-0" : "-translate-x-full"
+          }`}
+        >
+          <Sidebar
+            documents={documents}
+            onChanged={refreshDocuments}
+            onAskQuestion={(question) => {
+              chatRef.current?.ask(question);
+              setSidebarOpen(false);
+            }}
+            isAdmin={user.role === "ADMIN"}
+          />
+        </div>
         <ChatPanel ref={chatRef} providers={providers} />
       </div>
     </div>
