@@ -42,3 +42,18 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
 }
+
+export interface ProviderUsageWindow {
+  limit: number | null;
+  remaining: number | null;
+  /** Raw reset value from the provider's header (format varies by provider) */
+  resetHint: string | null;
+}
+
+export interface ProviderUsageSnapshot {
+  provider: ProviderName;
+  requests: ProviderUsageWindow;
+  tokens: ProviderUsageWindow;
+  /** null until at least one chat call has been made against this provider since server start */
+  updatedAt: string | null;
+}

@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import type { ChatSourceMatch, ProviderName } from "@slm/shared-types";
+import type { ChatSourceMatch, ProviderName, ProviderUsageSnapshot, ProviderUsageWindow } from "@slm/shared-types";
 import { Button } from "@/components/ui/button";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+const USAGE_POLL_MS = 20_000;
 
 interface ChatTurn {
   role: "user" | "assistant";
@@ -22,18 +23,70 @@ function scoreClass(score: number): string {
   return "text-red-600";
 }
 
+function windowPct(w: ProviderUsageWindow): number | null {
+  if (w.limit === null || w.remaining === null || w.limit === 0) return null;
+  return Math.round((w.remaining / w.limit) * 100);
+}
+
+// Whichever window (requests or tokens) is more constrained decides the badge,
+// since exhausting either one is what actually blocks the next call.
+function usagePct(snapshot: ProviderUsageSnapshot): number | null {
+  const requestsPct = windowPct(snapshot.requests);
+  const tokensPct = windowPct(snapshot.tokens);
+  if (requestsPct === null) return tokensPct;
+  if (tokensPct === null) return requestsPct;
+  return Math.min(requestsPct, tokensPct);
+}
+
+function usageClass(pct: number | null): string {
+  if (pct === null) return "text-zinc-400";
+  if (pct >= 50) return "text-green-600";
+  if (pct >= 20) return "text-orange-500";
+  return "text-red-600";
+}
+
+function usageTooltip(snapshot: ProviderUsageSnapshot): string {
+  if (!snapshot.updatedAt) return "No usage data yet — send a message with this provider first";
+  const parts: string[] = [];
+  if (snapshot.requests.limit !== null && snapshot.requests.remaining !== null) {
+    parts.push(`Requests: ${snapshot.requests.remaining}/${snapshot.requests.limit}`);
+  }
+  if (snapshot.tokens.limit !== null && snapshot.tokens.remaining !== null) {
+    parts.push(`Tokens: ${snapshot.tokens.remaining}/${snapshot.tokens.limit}`);
+  }
+  const resetHint = snapshot.tokens.resetHint ?? snapshot.requests.resetHint;
+  if (resetHint) parts.push(`resets in ${resetHint}`);
+  return parts.length > 0 ? parts.join(" · ") : "No usage data yet";
+}
+
 export function ChatPanel({ providers }: ChatPanelProps) {
   const [provider, setProvider] = useState<ProviderName | undefined>(providers[0]);
   const [messages, setMessages] = useState<ChatTurn[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [usage, setUsage] = useState<ProviderUsageSnapshot[]>([]);
 
   useEffect(() => {
     if (!provider && providers.length > 0) {
       setProvider(providers[0]);
     }
   }, [providers, provider]);
+
+  async function loadUsage() {
+    try {
+      const res = await fetch(`${API_URL}/providers/usage`, { credentials: "include" });
+      if (res.ok) setUsage(await res.json());
+    } catch {
+      // Background poll — a transient network blip shouldn't surface as a page error.
+    }
+  }
+
+  useEffect(() => {
+    loadUsage();
+    const interval = setInterval(loadUsage, USAGE_POLL_MS);
+    return () => clearInterval(interval);
+  }, []);
 
   async function handleSend(event: FormEvent) {
     event.preventDefault();
@@ -61,6 +114,7 @@ export function ChatPanel({ providers }: ChatPanelProps) {
 
     const data: { response: string; sources: ChatSourceMatch[] } = await res.json();
     setMessages((prev) => [...prev, { role: "assistant", content: data.response, sources: data.sources }]);
+    loadUsage();
   }
 
   async function handleClear() {
@@ -71,19 +125,35 @@ export function ChatPanel({ providers }: ChatPanelProps) {
   return (
     <div className="flex min-w-0 flex-1 flex-col">
       <div className="flex items-center justify-between border-b border-zinc-200 p-3 dark:border-zinc-800">
-        <select
-          value={provider}
-          onChange={(e) => setProvider(e.target.value as ProviderName)}
-          disabled={providers.length === 0}
-          className="rounded-md border border-zinc-200 bg-transparent px-2 py-1 text-sm dark:border-zinc-800"
-        >
-          {providers.length === 0 && <option>No provider configured</option>}
-          {providers.map((name) => (
-            <option key={name} value={name}>
-              {name}
-            </option>
-          ))}
-        </select>
+        <div className="flex items-center gap-3">
+          <select
+            value={provider}
+            onChange={(e) => setProvider(e.target.value as ProviderName)}
+            disabled={providers.length === 0}
+            className="rounded-md border border-zinc-200 bg-transparent px-2 py-1 text-sm dark:border-zinc-800"
+          >
+            {providers.length === 0 && <option>No provider configured</option>}
+            {providers.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+          <div className="flex gap-2 text-xs">
+            {usage.map((snapshot) => {
+              const pct = usagePct(snapshot);
+              return (
+                <span
+                  key={snapshot.provider}
+                  title={usageTooltip(snapshot)}
+                  className={usageClass(pct)}
+                >
+                  {snapshot.provider} {pct === null ? "—" : `${pct}% left`}
+                </span>
+              );
+            })}
+          </div>
+        </div>
         <Button variant="ghost" size="sm" onClick={handleClear}>
           Clear history
         </Button>
