@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import type { ProviderName } from '@slm/shared-types';
 import { VectorStoreService, type VectorMatch } from '../documents/vector-store.service';
@@ -49,6 +49,14 @@ export class ChatService {
       new HumanMessage(`Context:\n${context}\n\nQuestion: ${question}`),
     ]);
     const answer = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
+    if (!answer.trim()) {
+      // Don't cache or persist a blank reply — an empty LLM response is a
+      // provider hiccup, not a valid answer, and caching it would serve the
+      // same blank reply forever until the cache version next bumps.
+      throw new InternalServerErrorException(
+        `${provider} returned an empty response. Try again or switch providers.`,
+      );
+    }
 
     this.memory.save(userId, 'assistant', answer);
     await this.faq.setCachedAnswer(provider, question, { answer, sources: matches });
