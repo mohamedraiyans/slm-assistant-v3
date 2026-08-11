@@ -28,7 +28,16 @@ export interface DocumentSummary {
   id: string;
   filename: string;
   chunkCount: number;
-  uploadedBy: string;
+  uploadedBy: string | null;
+  createdAt: string;
+}
+
+export interface UserSummary {
+  id: string;
+  email: string;
+  name: string | null;
+  avatarUrl: string | null;
+  role: Role;
   createdAt: string;
 }
 

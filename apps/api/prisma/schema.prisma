@@ -35,8 +35,8 @@ model Document {
   id           String   @id @default(uuid())
   filename     String   @unique
   chunkCount   Int
-  uploadedBy   String
-  uploader     User     @relation(fields: [uploadedBy], references: [id])
+  uploadedBy   String?
+  uploader     User?    @relation(fields: [uploadedBy], references: [id], onDelete: SetNull)
   createdAt    DateTime @default(now())
 }
 
@@ -59,8 +59,8 @@ model ProviderCredential {
   encryptedValue String
   extraConfig    Json?
   isActive       Boolean      @default(true)
-  createdBy      String
-  creator        User         @relation(fields: [createdBy], references: [id])
+  createdBy      String?
+  creator        User?        @relation(fields: [createdBy], references: [id], onDelete: SetNull)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 

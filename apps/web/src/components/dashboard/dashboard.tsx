@@ -42,14 +42,24 @@ export function Dashboard({ user }: { user: AuthUser }) {
             {user.email} · {user.role}
           </span>
           {user.role === "ADMIN" && (
-            <Button
-              variant="outline"
-              size="sm"
-              nativeButton={false}
-              render={<Link href="/admin/providers" />}
-            >
-              Provider keys
-            </Button>
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                nativeButton={false}
+                render={<Link href="/admin/providers" />}
+              >
+                Provider keys
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                nativeButton={false}
+                render={<Link href="/admin/users" />}
+              >
+                Users
+              </Button>
+            </>
           )}
           <LogoutButton />
         </div>
@@ -73,6 +83,7 @@ export function Dashboard({ user }: { user: AuthUser }) {
           documents={documents}
           onChanged={refreshDocuments}
           onAskQuestion={(question) => chatRef.current?.ask(question)}
+          isAdmin={user.role === "ADMIN"}
         />
         <ChatPanel ref={chatRef} providers={providers} />
       </div>
