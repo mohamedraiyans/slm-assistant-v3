@@ -5,8 +5,9 @@
 This project currently has these pieces:
 
   1. Database    (Postgres, runs inside Docker)
-  2. Redis       (reserved for Phase 7 rate-limiting, runs inside Docker,
-                  nothing uses it yet)
+  2. Redis       (runs inside Docker) - powers the FAQ answer cache and
+                  question-frequency ranking (see Part I). Per-user/IP
+                  rate limiting is a separate, still-unused use case for it.
   3. Vector DB   (Chroma, runs inside Docker)
   4. Adminer     (Postgres web UI, runs inside Docker) -> http://localhost:8081
   5. Backend     (NestJS, TypeScript)          -> http://localhost:4000
@@ -151,7 +152,68 @@ provider dropdown in the chat panel populated from whatever admins
 have added; they never see the raw keys.
 
 --------------------------------------------------------------------
- PART H - KNOWN GOTCHAS HIT DURING DEVELOPMENT (fixed, but good to know)
+ PART I - FAQ CACHE (Redis) & THE "FREQUENTLY ASKED" TAB
+--------------------------------------------------------------------
+
+Every chat question is normalized (lowercased, trimmed, punctuation
+stripped) and its ask-count tracked in a Redis sorted set. The sidebar's
+"Frequently Asked" tab lists the top questions by that count, ranked by
+real usage. Clicking one sends it through the normal chat flow.
+
+Before a question touches Chroma or an LLM provider, the api checks
+Redis for a cached (provider, normalized-question) answer. On a hit it
+returns instantly - no vector search, no LLM API call - and the chat
+UI shows a "cached" badge on that reply. Answers carry a 6h TTL, but
+uploading or deleting ANY document also bumps a Redis version counter
+that instantly invalidates every previously cached answer, so a
+knowledge-base change can never leave a stale answer live.
+
+Admins can delete a junk entry (e.g. someone typed "yes" as a message
+and it got tracked) directly from the tab - a Delete button appears on
+each row for ADMIN accounts only. This only removes it from the
+ranking; it doesn't clear the underlying answer cache.
+
+To inspect the cache directly:
+      docker compose exec redis redis-cli KEYS "faq:*"
+      docker compose exec redis redis-cli ZREVRANGE faq:counts 0 9 WITHSCORES
+
+--------------------------------------------------------------------
+ PART J - PROVIDER USAGE BADGES (rate-limit %, not billing balance)
+--------------------------------------------------------------------
+
+The chat panel shows a colored badge per provider (e.g. "GROQ 82%
+left") next to the provider dropdown. This comes from the rate-limit
+response headers Groq/Azure/Anthropic attach to every real API call
+(x-ratelimit-* / anthropic-ratelimit-*) - captured via a custom fetch
+wrapper passed into each LangChain client, since invoke() itself
+doesn't surface response headers. It updates passively: only providers
+you've actually sent a chat message to (since the api last restarted)
+have data; others show "-".
+
+This is rate-limit headroom, not a dollar-credit balance - none of
+these providers expose per-key billing balance via API. Some
+deployments (e.g. Azure OpenAI's Model Router) don't return
+rate-limit headers at all, in which case the badge legitimately stays
+"-" forever for that provider; that's not a bug.
+
+--------------------------------------------------------------------
+ PART K - MANAGING USERS (admin only)
+--------------------------------------------------------------------
+
+Log in as an ADMIN -> click "Users" on the dashboard (or go to
+/admin/users) -> a table of every user (email, name, role, joined
+date) with a Delete button per row.
+
+You cannot delete your own account (blocked server-side; the button is
+just hidden client-side on your own row, showing "You" instead). If a
+deleted user had uploaded documents or added provider keys, those
+records survive - Document.uploadedBy / ProviderCredential.createdBy
+just become null (see the nullable_user_owner_fks migration). Deleting
+an ADMIN isn't permanent either: they're re-promoted automatically the
+next time they sign in with Google, per the ADMIN_EMAILS allowlist.
+
+--------------------------------------------------------------------
+ PART L - KNOWN GOTCHAS HIT DURING DEVELOPMENT (fixed, but good to know)
 --------------------------------------------------------------------
 
 - The local embedding model (Xenova/all-MiniLM-L6-v2, used to embed
@@ -173,6 +235,16 @@ have added; they never see the raw keys.
   back to /login unexpectedly, that's just the session expiring — sign
   in again, it's instant since Google still remembers you.
 
+- On Windows, `nest start --watch` occasionally crashes on its own
+  restart cycle (`ERROR: The process "<pid>" not found` /
+  `taskkill /pid ... /T /F` failing, sometimes followed by
+  `Cannot find module .../dist/main`). This is nest-cli's Windows
+  process-tree-kill racing itself, not a code error — Found 0 errors
+  usually appears right before it happens. Fix: just re-run
+  `npm run dev` in apps/api. Also avoid running `npx nest build`
+  manually while `--watch` is active — it writes to the same dist/
+  folder the watcher depends on and can trigger this same crash.
+
 --------------------------------------------------------------------
  QUICK REFERENCE - command-only cheat sheet
 --------------------------------------------------------------------
@@ -181,13 +253,18 @@ have added; they never see the raw keys.
   Stop data services:       docker compose stop
   Wipe DB + vectors:        docker compose down -v
   Run a migration:          cd apps/api && npx prisma migrate dev
-  Type-check api:           cd apps/api && npx nest build
+  Type-check api:           cd apps/api && npx tsc --noEmit
+                             (avoid `npx nest build` while --watch is
+                             running — see Part L gotchas)
   Type-check web:           cd apps/web && npx tsc --noEmit
   App:                      http://localhost:3000
+  Admin: provider keys:     http://localhost:3000/admin/providers
+  Admin: users:             http://localhost:3000/admin/users
   API:                      http://localhost:4000
   API health check:         http://localhost:4000/health
   Chroma:                   http://localhost:8000
   Adminer (DB browser):     http://localhost:8081
   Postgres (psql via Docker): docker compose exec postgres psql -U slm -d slm
+  Redis (cli via Docker):     docker compose exec redis redis-cli
 
 ====================================================================

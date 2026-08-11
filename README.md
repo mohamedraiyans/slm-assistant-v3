@@ -36,8 +36,9 @@ slm-assistant-v3/
 │   │   │                          RefreshToken, ProviderCredential)
 │   │   └── src/
 │   │       ├── auth/              Google OAuth, JWT strategy, RBAC guards
-│   │       ├── users/             User module
-│   │       ├── providers/         Encrypted LLM provider key vault (admin)
+│   │       ├── users/             Admin user list + delete (GET/DELETE /users)
+│   │       ├── providers/         Encrypted LLM provider key vault (admin) +
+│   │       │                      per-provider rate-limit usage tracking
 │   │       ├── documents/         Upload, parsing, chunking, Chroma vector store
 │   │       ├── chat/              RAG orchestration, per-provider chat model factory
 │   │       ├── faq/               Redis-backed answer cache + question frequency ranking
@@ -46,13 +47,17 @@ slm-assistant-v3/
 │   │       ├── eval/              Scaffolded — not implemented yet
 │   │       └── health/            Health check endpoint
 │   └── web/                       Next.js frontend (port 3000)
+│       ├── public/wallpaper.svg   Constellation background asset (login page
+│       │                          + app-wide navy/amber theme)
 │       └── src/
 │           ├── app/
-│           │   ├── login/         Google sign-in page
-│           │   └── admin/providers/  Admin UI for managing provider keys
+│           │   ├── login/         Google sign-in page (full wallpaper, glass card)
+│           │   ├── admin/providers/  Admin UI for managing provider keys
+│           │   └── admin/users/   Admin UI: view/delete users (table)
 │           ├── components/dashboard/  Chat panel (usage badges, cache
 │           │                          indicator), sidebar (Documents /
-│           │                          Frequently Asked tabs), dashboard shell
+│           │                          Frequently Asked tabs, admin delete),
+│           │                          dashboard shell
 │           └── lib/               API client, auth helpers
 ├── packages/
 │   └── shared-types/               Types shared between api and web (Role,
@@ -73,6 +78,20 @@ slm-assistant-v3/
 - Keys are encrypted with AES-256-GCM before they touch Postgres
 - Regular users only ever see a provider dropdown — never raw keys
 - Currently configured and active: **Groq** and **Azure OpenAI**
+
+**Provider usage tracking**
+- Every chat call is made through a custom `fetch` wrapper injected into each
+  LangChain client (`ChatGroq`/`AzureChatOpenAI`/`ChatAnthropic`), which reads
+  the provider's rate-limit response headers (`x-ratelimit-*` for
+  Groq/Azure, `anthropic-ratelimit-*` for Anthropic) — LangChain's own
+  `invoke()` doesn't surface these, so this is the only way to see them
+- `GET /providers/usage` exposes the latest reading per provider; the chat
+  panel shows it as a colored `GROQ 82% left` badge next to the provider
+  dropdown, so a user can tell when to switch providers before hitting a 429
+- This reflects **rate-limit headroom**, not billing balance — none of the
+  three providers expose a dollar-credit API per key. Some deployments (e.g.
+  Azure's Model Router) don't return these headers at all, in which case the
+  badge shows `—` rather than a guess
 
 **Document ingestion & retrieval**
 - Upload PDF or DOCX files; parsed via `pdf-parse` / `mammoth`
@@ -107,6 +126,31 @@ slm-assistant-v3/
   key scan), so a knowledge-base change can never leave a stale answer live
 - Clicking a question in the "Frequently Asked" tab sends it straight through
   the normal chat flow, so it's a live shortcut, not just a static list
+- Admins can prune junk entries (e.g. a stray "yes") straight from the tab —
+  `DELETE /chat/faq` is admin-only and just removes the question from the
+  ranking; it doesn't affect the underlying cached answer
+
+**User management (admin)**
+- `/admin/users` lists every user in a table (email, name, role, joined date)
+  with `GET /users` / `DELETE /users/:id`, both admin-only
+- Deleting a user is blocked server-side if it's your own account (and the
+  delete button is hidden client-side on your own row, showing "You" instead)
+- `Document.uploadedBy` and `ProviderCredential.createdBy` are nullable with
+  `onDelete: SetNull` — deleting a user who uploaded documents or added
+  provider keys just clears the "created by" attribution; the shared
+  resource itself isn't touched
+- Deleting an admin isn't permanent: Google login re-promotes any
+  `ADMIN_EMAILS` address to `ADMIN` on next sign-in, recreating the account
+  if needed
+
+**UI**
+- Navy/amber theme (CSS variables in `globals.css`) rather than the default
+  shadcn grayscale — the login page shows the full constellation wallpaper in
+  a glass card; the dashboard/admin pages use the same palette on a solid
+  background so dense chat/document text stays legible
+- `color-scheme: dark` plus explicit `select`/`option` styling so native
+  dropdown popups (which ignore normal CSS) match the rest of the theme
+  instead of rendering the browser's light-mode default
 
 **Infra**
 - Dockerized local dependencies (Postgres, Redis, Chroma, Adminer)
