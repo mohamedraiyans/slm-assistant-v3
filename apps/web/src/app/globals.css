@@ -138,5 +138,11 @@
   }
   html {
     @apply font-sans;
+    color-scheme: dark;
+  }
+  select,
+  option {
+    background-color: var(--popover);
+    color: var(--popover-foreground);
   }
 }

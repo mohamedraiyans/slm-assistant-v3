@@ -31,6 +31,11 @@ export class FaqService {
     await this.redis.zincrby(COUNTS_KEY, 1, normalized);
   }
 
+  /** Removes a question from the frequency ranking, e.g. to prune junk entries. */
+  async remove(question: string): Promise<void> {
+    await this.redis.zrem(COUNTS_KEY, this.normalize(question));
+  }
+
   async getTopQuestions(limit = 10): Promise<FaqEntry[]> {
     const raw = await this.redis.zrevrange(COUNTS_KEY, 0, limit - 1, 'WITHSCORES');
     const entries: FaqEntry[] = [];

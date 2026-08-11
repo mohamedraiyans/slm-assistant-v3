@@ -11,9 +11,10 @@ interface SidebarProps {
   documents: DocumentSummary[];
   onChanged: () => void;
   onAskQuestion: (question: string) => void;
+  isAdmin: boolean;
 }
 
-export function Sidebar({ documents, onChanged, onAskQuestion }: SidebarProps) {
+export function Sidebar({ documents, onChanged, onAskQuestion, isAdmin }: SidebarProps) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -21,19 +22,28 @@ export function Sidebar({ documents, onChanged, onAskQuestion }: SidebarProps) {
   const [faq, setFaq] = useState<FaqEntry[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    async function loadFaq() {
-      try {
-        const res = await fetch(`${API_URL}/chat/faq`, { credentials: "include" });
-        if (res.ok) setFaq(await res.json());
-      } catch {
-        // Background poll — ignore transient failures.
-      }
+  async function loadFaq() {
+    try {
+      const res = await fetch(`${API_URL}/chat/faq`, { credentials: "include" });
+      if (res.ok) setFaq(await res.json());
+    } catch {
+      // Background poll — ignore transient failures.
     }
+  }
+
+  useEffect(() => {
     loadFaq();
     const interval = setInterval(loadFaq, FAQ_POLL_MS);
     return () => clearInterval(interval);
   }, []);
+
+  async function handleDeleteFaq(question: string) {
+    await fetch(`${API_URL}/chat/faq?question=${encodeURIComponent(question)}`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+    loadFaq();
+  }
 
   async function uploadFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
@@ -160,15 +170,26 @@ export function Sidebar({ documents, onChanged, onAskQuestion }: SidebarProps) {
             </p>
           )}
           {faq.map((entry) => (
-            <button
+            <div
               key={entry.question}
-              onClick={() => onAskQuestion(entry.question)}
-              className="flex items-center justify-between gap-2 rounded-lg border border-border p-2 text-left text-sm hover:bg-muted"
-              title="Click to ask this question"
+              className="flex items-center justify-between gap-2 rounded-lg border border-border p-2 text-sm"
             >
-              <span className="truncate">{entry.question}</span>
-              <span className="shrink-0 text-xs text-muted-foreground">×{entry.count}</span>
-            </button>
+              <button
+                onClick={() => onAskQuestion(entry.question)}
+                className="min-w-0 flex-1 truncate text-left hover:bg-muted"
+                title="Click to ask this question"
+              >
+                {entry.question}
+              </button>
+              <div className="flex shrink-0 items-center gap-2">
+                <span className="text-xs text-muted-foreground">×{entry.count}</span>
+                {isAdmin && (
+                  <Button variant="ghost" size="sm" onClick={() => void handleDeleteFaq(entry.question)}>
+                    Delete
+                  </Button>
+                )}
+              </div>
+            </div>
           ))}
         </div>
       )}
