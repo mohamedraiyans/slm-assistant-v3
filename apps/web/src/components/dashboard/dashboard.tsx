@@ -34,11 +34,11 @@ export function Dashboard({ user }: { user: AuthUser }) {
   }, []);
 
   return (
-    <div className="flex h-screen flex-col">
-      <header className="flex items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+    <div className="flex h-screen flex-col bg-background">
+      <header className="flex items-center justify-between border-b border-border px-4 py-3">
         <h1 className="text-lg font-semibold tracking-tight">SLM Assistant v3</h1>
         <div className="flex items-center gap-3 text-sm">
-          <span className="text-zinc-600 dark:text-zinc-400">
+          <span className="text-muted-foreground">
             {user.email} · {user.role}
           </span>
           {user.role === "ADMIN" && (
@@ -56,7 +56,7 @@ export function Dashboard({ user }: { user: AuthUser }) {
       </header>
 
       {loaded && providers.length === 0 && (
-        <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+        <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-300">
           No LLM provider is configured yet.{" "}
           {user.role === "ADMIN" ? (
             <Link href="/admin/providers" className="underline">

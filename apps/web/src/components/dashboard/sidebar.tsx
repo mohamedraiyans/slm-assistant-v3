@@ -67,12 +67,12 @@ export function Sidebar({ documents, onChanged, onAskQuestion }: SidebarProps) {
   }
 
   return (
-    <aside className="flex w-72 shrink-0 flex-col gap-4 border-r border-zinc-200 p-4 dark:border-zinc-800">
-      <div className="flex gap-1 rounded-md border border-zinc-200 p-1 text-sm dark:border-zinc-800">
+    <aside className="flex w-72 shrink-0 flex-col gap-4 border-r border-border bg-background p-4">
+      <div className="flex gap-1 rounded-md border border-border p-1 text-sm">
         <button
           onClick={() => setTab("documents")}
           className={`flex-1 rounded px-2 py-1 ${
-            tab === "documents" ? "bg-primary text-primary-foreground" : "text-zinc-500"
+            tab === "documents" ? "bg-primary text-primary-foreground" : "text-muted-foreground"
           }`}
         >
           Documents
@@ -80,7 +80,7 @@ export function Sidebar({ documents, onChanged, onAskQuestion }: SidebarProps) {
         <button
           onClick={() => setTab("faq")}
           className={`flex-1 rounded px-2 py-1 ${
-            tab === "faq" ? "bg-primary text-primary-foreground" : "text-zinc-500"
+            tab === "faq" ? "bg-primary text-primary-foreground" : "text-muted-foreground"
           }`}
         >
           Frequently Asked
@@ -104,11 +104,11 @@ export function Sidebar({ documents, onChanged, onAskQuestion }: SidebarProps) {
             className={`flex cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed p-6 text-center text-sm transition-colors ${
               dragOver
                 ? "border-primary bg-primary/5"
-                : "border-zinc-300 text-zinc-500 dark:border-zinc-700"
+                : "border-border text-muted-foreground"
             }`}
           >
             <span>{uploading ? "Uploading..." : "Drop files or click to upload"}</span>
-            <span className="text-xs text-zinc-400">.txt, .pdf, .docx</span>
+            <span className="text-xs text-muted-foreground">.txt, .pdf, .docx</span>
             <input
               ref={fileInputRef}
               type="file"
@@ -123,12 +123,12 @@ export function Sidebar({ documents, onChanged, onAskQuestion }: SidebarProps) {
 
           <div className="flex flex-col gap-2 overflow-y-auto">
             {documents.length === 0 && (
-              <p className="text-sm text-zinc-500">No documents yet.</p>
+              <p className="text-sm text-muted-foreground">No documents yet.</p>
             )}
             {documents.map((doc) => (
               <div
                 key={doc.id}
-                className="flex items-center justify-between gap-2 rounded-lg border border-zinc-200 p-2 text-sm dark:border-zinc-800"
+                className="flex items-center justify-between gap-2 rounded-lg border border-border p-2 text-sm"
               >
                 <a
                   href={`${API_URL}/documents/${encodeURIComponent(doc.filename)}/file`}
@@ -155,7 +155,7 @@ export function Sidebar({ documents, onChanged, onAskQuestion }: SidebarProps) {
       {tab === "faq" && (
         <div className="flex flex-col gap-2 overflow-y-auto">
           {faq.length === 0 && (
-            <p className="text-sm text-zinc-500">
+            <p className="text-sm text-muted-foreground">
               No questions asked yet — frequently asked questions will show up here as people chat.
             </p>
           )}
@@ -163,11 +163,11 @@ export function Sidebar({ documents, onChanged, onAskQuestion }: SidebarProps) {
             <button
               key={entry.question}
               onClick={() => onAskQuestion(entry.question)}
-              className="flex items-center justify-between gap-2 rounded-lg border border-zinc-200 p-2 text-left text-sm hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
+              className="flex items-center justify-between gap-2 rounded-lg border border-border p-2 text-left text-sm hover:bg-muted"
               title="Click to ask this question"
             >
               <span className="truncate">{entry.question}</span>
-              <span className="shrink-0 text-xs text-zinc-400">×{entry.count}</span>
+              <span className="shrink-0 text-xs text-muted-foreground">×{entry.count}</span>
             </button>
           ))}
         </div>

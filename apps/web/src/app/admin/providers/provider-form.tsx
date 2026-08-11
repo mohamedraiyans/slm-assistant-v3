@@ -39,11 +39,11 @@ export function ProviderForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
+    <form onSubmit={handleSubmit} className="flex flex-col gap-3 rounded-lg border border-border p-4">
       <select
         value={provider}
         onChange={(event) => setProvider(event.target.value as ProviderName)}
-        className="rounded-md border border-zinc-200 bg-transparent px-2 py-1.5 text-sm dark:border-zinc-800"
+        className="rounded-md border border-border bg-transparent px-2 py-1.5 text-sm"
       >
         {PROVIDERS.map((name) => (
           <option key={name} value={name}>
@@ -56,7 +56,7 @@ export function ProviderForm() {
         value={label}
         onChange={(event) => setLabel(event.target.value)}
         required
-        className="rounded-md border border-zinc-200 bg-transparent px-2 py-1.5 text-sm dark:border-zinc-800"
+        className="rounded-md border border-border bg-transparent px-2 py-1.5 text-sm"
       />
       <input
         placeholder="API key"
@@ -64,9 +64,9 @@ export function ProviderForm() {
         value={value}
         onChange={(event) => setValue(event.target.value)}
         required
-        className="rounded-md border border-zinc-200 bg-transparent px-2 py-1.5 text-sm dark:border-zinc-800"
+        className="rounded-md border border-border bg-transparent px-2 py-1.5 text-sm"
       />
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-red-400">{error}</p>}
       <Button type="submit" disabled={submitting}>
         {submitting ? "Saving..." : "Add key"}
       </Button>

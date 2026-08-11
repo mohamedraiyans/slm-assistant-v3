@@ -14,7 +14,7 @@ export default async function AdminProvidersPage() {
   const credentials: ProviderCredentialPublic[] = res.ok ? await res.json() : [];
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-xl flex-col gap-8 px-6 py-16">
+    <div className="mx-auto flex min-h-screen max-w-xl flex-col gap-8 bg-background px-6 py-16">
       <h1 className="text-2xl font-semibold tracking-tight">Provider Keys</h1>
       <ProviderForm />
       <ProviderList credentials={credentials} />
