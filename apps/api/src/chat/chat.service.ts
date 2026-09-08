@@ -1,7 +1,14 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
-import { HumanMessage, SystemMessage } from '@langchain/core/messages';
+import { ChatPromptTemplate } from '@langchain/core/prompts';
+import { StringOutputParser } from '@langchain/core/output_parsers';
+import { RunnableSequence } from '@langchain/core/runnables';
+import type { Document } from '@langchain/core/documents';
 import type { ProviderName } from '@slm/shared-types';
-import { VectorStoreService, type VectorMatch } from '../documents/vector-store.service';
+import {
+  KnowledgeBaseRetriever,
+  type KnowledgeBaseDocMetadata,
+} from '../documents/knowledge-base-retriever';
+import type { VectorMatch } from '../documents/vector-store.service';
 import { FaqService } from '../faq/faq.service';
 import { MemoryService } from './memory.service';
 import { ProviderFactory } from './provider-factory.service';
@@ -10,6 +17,25 @@ const SYSTEM_PROMPT =
   "You are a helpful assistant answering questions using the company's knowledge base. " +
   'Use the provided context to answer naturally and confidently, handling synonyms and ' +
   "paraphrased questions. If the answer isn't in the context, say so clearly.";
+
+const promptTemplate = ChatPromptTemplate.fromMessages([
+  ['system', SYSTEM_PROMPT],
+  ['human', 'Context:\n{context}\n\nQuestion: {question}'],
+]);
+
+function formatDocuments(docs: Document<KnowledgeBaseDocMetadata>[]): string {
+  return docs.length
+    ? docs.map((doc) => `[${doc.metadata.filename}] ${doc.pageContent}`).join('\n\n')
+    : 'No relevant information found in the knowledge base.';
+}
+
+function toVectorMatches(docs: Document<KnowledgeBaseDocMetadata>[]): VectorMatch[] {
+  return docs.map((doc) => ({
+    filename: doc.metadata.filename,
+    text: doc.pageContent,
+    score: doc.metadata.score,
+  }));
+}
 
 export interface ChatResult {
   answer: string;
@@ -20,7 +46,7 @@ export interface ChatResult {
 @Injectable()
 export class ChatService {
   constructor(
-    private readonly vectorStore: VectorStoreService,
+    private readonly retriever: KnowledgeBaseRetriever,
     private readonly providerFactory: ProviderFactory,
     private readonly memory: MemoryService,
     private readonly faq: FaqService,
@@ -38,17 +64,11 @@ export class ChatService {
       return { answer: cached.answer, sources: cached.sources, cached: true };
     }
 
-    const matches = await this.vectorStore.query(question, 5);
-    const context = matches.length
-      ? matches.map((m) => `[${m.filename}] ${m.text}`).join('\n\n')
-      : 'No relevant information found in the knowledge base.';
-
+    const docs = await this.retriever.invoke(question);
     const model = await this.providerFactory.build(provider);
-    const response = await model.invoke([
-      new SystemMessage(SYSTEM_PROMPT),
-      new HumanMessage(`Context:\n${context}\n\nQuestion: ${question}`),
-    ]);
-    const answer = typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
+    const chain = RunnableSequence.from([promptTemplate, model, new StringOutputParser()]);
+    const answer = await chain.invoke({ context: formatDocuments(docs), question });
+
     if (!answer.trim()) {
       // Don't cache or persist a blank reply — an empty LLM response is a
       // provider hiccup, not a valid answer, and caching it would serve the
@@ -58,8 +78,9 @@ export class ChatService {
       );
     }
 
+    const sources = toVectorMatches(docs);
     this.memory.save(userId, 'assistant', answer);
-    await this.faq.setCachedAnswer(provider, question, { answer, sources: matches });
-    return { answer, sources: matches, cached: false };
+    await this.faq.setCachedAnswer(provider, question, { answer, sources });
+    return { answer, sources, cached: false };
   }
 }
