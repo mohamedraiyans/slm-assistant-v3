@@ -19,7 +19,7 @@ multi-tenant architecture with proper auth, RBAC, and a real vector store.
 | Database | PostgreSQL |
 | Vector store | Chroma (cosine similarity / HNSW) |
 | Embeddings | Local, via `@huggingface/transformers` (Xenova/all-MiniLM-L6-v2) — never leaves the machine |
-| RAG / LLM orchestration | LangChain (`@langchain/core`) as a chat-model abstraction over Groq, Azure OpenAI, and Anthropic |
+| RAG / LLM orchestration | LangChain (`@langchain/core`) — multi-provider `BaseChatModel`s (Groq, Azure OpenAI, Anthropic), a custom `BaseRetriever` over Chroma, and an LCEL generation chain (`ChatPromptTemplate → model → StringOutputParser`) |
 | Cache | Redis (`ioredis`) — FAQ answer cache + frequency ranking, see below |
 | Auth | Google OAuth2 (Passport) + JWT (httpOnly cookie), role-based access control |
 | Secrets | AES-256-GCM encrypted provider API keys at rest |
@@ -39,8 +39,9 @@ slm-assistant-v3/
 │   │       ├── users/             Admin user list + delete (GET/DELETE /users)
 │   │       ├── providers/         Encrypted LLM provider key vault (admin) +
 │   │       │                      per-provider rate-limit usage tracking
-│   │       ├── documents/         Upload, parsing, chunking, Chroma vector store
-│   │       ├── chat/              RAG orchestration, per-provider chat model factory
+│   │       ├── documents/         Upload, parsing, chunking, Chroma vector store,
+│   │       │                      KnowledgeBaseRetriever (LangChain BaseRetriever)
+│   │       ├── chat/              LCEL RAG chain, per-provider chat model factory
 │   │       ├── faq/               Redis-backed answer cache + question frequency ranking
 │   │       ├── redis/             Global module providing the shared ioredis client
 │   │       ├── quiz/              Scaffolded — not implemented yet
@@ -63,6 +64,7 @@ slm-assistant-v3/
 │   └── shared-types/               Types shared between api and web (Role,
 │                                    ProviderName, AuthUser, ChatMessage, ...)
 ├── docker-compose.yml               Postgres, Redis, Chroma, Adminer
+├── CLAUDE.md                        Commands + architecture map for Claude Code
 └── HOW_TO_RUN.txt                   Full local setup + troubleshooting guide
 ```
 
@@ -100,10 +102,20 @@ slm-assistant-v3/
 - Cosine-similarity top-k retrieval at query time
 
 **Chat**
-- Retrieved chunks are assembled into context and sent to the user's chosen
-  LLM provider via LangChain's `BaseChatModel` abstraction
+- Retrieval goes through `KnowledgeBaseRetriever`, a real LangChain
+  `BaseRetriever` wrapping the Chroma-backed vector store (not a raw method
+  call) — kept as a custom retriever rather than adopting
+  `@langchain/community`'s `Chroma` vectorstore, since that would also mean
+  migrating the working local embedding function
+- Generation is an LCEL chain — `ChatPromptTemplate | model |
+  StringOutputParser`, composed with `RunnableSequence` — against whichever
+  provider's `BaseChatModel` the user picked
 - Per-user in-memory conversation history
-- Answers include their source chunks for traceability
+- Answers include their source chunks (filename + similarity score) for
+  traceability
+- An empty/blank LLM response is treated as a failure, not a valid answer —
+  it's never cached or saved to history, so a provider hiccup can't get
+  served back forever
 
 **Redis-backed FAQ cache**
 - Every question is normalized (lowercased, trimmed, punctuation stripped) and
