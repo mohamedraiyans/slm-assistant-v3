@@ -38,7 +38,7 @@ export class ProviderFactory {
       case 'GROQ':
         return new ChatGroq({
           apiKey: credential.apiKey,
-          model: (credential.extraConfig?.model as string) ?? 'llama-3.3-70b-versatile',
+          model: (credential.extraConfig?.model as string) ?? 'openai/gpt-oss-120b',
           temperature: 0.3,
           maxTokens: 512,
           fetch: this.usageTrackingFetch(provider),
