@@ -28,8 +28,13 @@ export class ChatController {
   }
 
   @Get('faq')
-  faq(@Query('limit') limit?: string): Promise<FaqEntry[]> {
-    return this.faqService.getTopQuestions(limit ? Number(limit) : undefined);
+  async faq(@Query('limit') limit?: string): Promise<FaqEntry[]> {
+    const entries = await this.faqService.getTopQuestions(limit ? Number(limit) : undefined);
+    // Fire-and-forget: warming is a no-op unless a document change has invalidated
+    // the cache since the last warm, and it never throws, so the list returns
+    // immediately either way.
+    void this.chatService.warmFrequentQuestions();
+    return entries;
   }
 
   @UseGuards(RolesGuard)

@@ -10,7 +10,12 @@ export interface CachedAnswer {
 
 const COUNTS_KEY = 'faq:counts';
 const CACHE_VERSION_KEY = 'faq:cache-version';
-const ANSWER_TTL_SECONDS = 60 * 60 * 6; // 6h safety net on top of explicit invalidation
+// Document changes are handled by the version bump below, not by expiry, so this
+// is deliberately long — a short TTL just meant frequently-asked questions kept
+// falling back to a fresh LLM call for no correctness benefit. It can't be dropped
+// entirely though: a version bump orphans keys rather than deleting them, so the
+// TTL is what eventually garbage-collects those orphans instead of leaking forever.
+const ANSWER_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days
 
 @Injectable()
 export class FaqService {
@@ -61,8 +66,23 @@ export class FaqService {
     await this.redis.incr(CACHE_VERSION_KEY);
   }
 
+  /**
+   * Claims the right to pre-warm the cache for the current version. Returns true
+   * for exactly one caller per version (SET NX is atomic, so concurrent callers
+   * can't both win) and false thereafter — so warming runs once after each
+   * document change rather than on every FAQ poll.
+   */
+  async claimWarmSlot(): Promise<boolean> {
+    const key = `faq:warmed:v${await this.currentVersion()}`;
+    const claimed = await this.redis.set(key, '1', 'EX', ANSWER_TTL_SECONDS, 'NX');
+    return claimed === 'OK';
+  }
+
+  private async currentVersion(): Promise<string> {
+    return (await this.redis.get(CACHE_VERSION_KEY)) ?? '1';
+  }
+
   private async answerKey(provider: ProviderName, question: string): Promise<string> {
-    const version = (await this.redis.get(CACHE_VERSION_KEY)) ?? '1';
-    return `faq:answer:v${version}:${provider}:${this.normalize(question)}`;
+    return `faq:answer:v${await this.currentVersion()}:${provider}:${this.normalize(question)}`;
   }
 }

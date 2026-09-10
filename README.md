@@ -132,10 +132,19 @@ slm-assistant-v3/
 - Cached per provider (not globally), since different providers can phrase
   answers differently — a cached Groq answer is never served for an Azure
   request
-- Answers carry a 6-hour TTL as a safety net, but the real invalidation path
-  is explicit: uploading or deleting a document bumps a Redis version counter
-  that instantly orphans every previously cached answer (an O(1) bump, not a
-  key scan), so a knowledge-base change can never leave a stale answer live
+- Answers carry a 7-day TTL, but that's only there to garbage-collect orphans —
+  the real invalidation path is explicit: uploading or deleting a document bumps
+  a Redis version counter that instantly orphans every previously cached answer
+  (an O(1) bump, not a key scan), so a knowledge-base change can never leave a
+  stale answer live
+- The ranking and the answers have deliberately different lifetimes — the
+  frequency sorted set never expires, answers do — so the list can outlive the
+  answers behind it. **Cache pre-warming** closes that gap: after a document
+  change invalidates everything, the next FAQ poll kicks off a background job
+  that re-generates answers for the top questions across every active provider,
+  so clicking one is instant instead of paying for a fresh LLM call. It's gated
+  by an atomic `SET NX` flag scoped to the cache version, so it runs exactly once
+  per document change no matter how often the sidebar polls
 - Clicking a question in the "Frequently Asked" tab sends it straight through
   the normal chat flow, so it's a live shortcut, not just a static list
 - Admins can prune junk entries (e.g. a stray "yes") straight from the tab —

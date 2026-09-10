@@ -57,19 +57,28 @@ reliably triggers this crash. Use `npx tsc --noEmit` for type-checking instead.
 Module boundaries matter here — trace a request across modules rather than assuming one file owns a
 feature:
 
-- **`chat/`** — `ChatService.handleChat()` is the actual RAG pipeline, and it's hand-rolled, not a
-  LangChain chain/LCEL pipeline: query Chroma → assemble a plain context string → `SystemMessage`/
-  `HumanMessage` → `model.invoke()`. LangChain's role in this codebase is deliberately narrow: it's only
-  the `BaseChatModel` abstraction (`ChatGroq` / `AzureChatOpenAI` / `ChatAnthropic`) that lets
-  `provider-factory.service.ts` swap providers behind one interface, plus the message classes. There is no
-  `RetrievalQAChain` or `PromptTemplate` anywhere.
+- **`chat/`** — `ChatService.handleChat()` is the RAG pipeline. Retrieval goes through
+  `KnowledgeBaseRetriever` (a real LangChain `BaseRetriever` living in `documents/`, wrapping the Chroma
+  vector store), and generation is an LCEL chain: `RunnableSequence.from([ChatPromptTemplate, model,
+  StringOutputParser])`. Retrieval is deliberately a *separate step* rather than folded into the chain,
+  because the retrieved `Document[]` (with filename + score metadata) is needed on its own for source
+  citations and the FAQ cache entry. `generateAnswer()` is the shared retrieval+generation core, kept free
+  of memory/counter side effects so background cache warming can reuse it.
+  `provider-factory.service.ts` swaps `ChatGroq` / `AzureChatOpenAI` / `ChatAnthropic` behind
+  `BaseChatModel`, so everything above it is written once regardless of provider.
 - **`faq/`** — Redis-backed answer cache + question-frequency ranking, sitting in front of the RAG
   pipeline. `ChatService` checks `FaqService.getCachedAnswer(provider, question)` *before* touching Chroma
   or calling the LLM; a hit skips both entirely. Cache keys are versioned
   (`faq:answer:v{version}:{provider}:{question}`) — uploading or deleting *any* document bumps the version
   via `invalidateAll()`, which is an O(1) `INCR`, not a key scan/delete. An empty/blank LLM response is
-  treated as a failure and is never cached (see the `answer.trim()` check in `handleChat`) — a provider
+  treated as a failure and is never cached (see the `answer.trim()` check in `generateAnswer`) — a provider
   hiccup must not get served forever from cache.
+  Two lifetimes to keep straight: the ranking (`faq:counts`, a sorted set) **never expires**, while answers
+  carry a 7-day TTL *and* die on any version bump. That asymmetry is why the FAQ list can list questions
+  that have no cached answer behind them. `ChatService.warmFrequentQuestions()` closes that gap — triggered
+  fire-and-forget from `GET /chat/faq`, gated by `FaqService.claimWarmSlot()` (a `SET NX` on
+  `faq:warmed:v{version}`) so it pre-generates the top questions × active providers exactly once per
+  version, not on every 30s poll from the sidebar.
 - **`providers/`** — encrypted (AES-256-GCM) LLM API key vault, plus `ProviderUsageService`, which reads
   rate-limit response headers (`x-ratelimit-*` / `anthropic-ratelimit-*`) captured via a custom `fetch`
   wrapper injected into each LangChain client in `provider-factory.service.ts` — this is necessary because
