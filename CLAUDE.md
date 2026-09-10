@@ -86,8 +86,12 @@ feature:
   balance; some deployments (e.g. Azure's Model Router) don't return these headers at all, and the frontend
   correctly shows `—` rather than guessing.
 - **`documents/`** — upload → `document-extractor.ts` (pdf-parse/mammoth) → `document-chunker.ts`
-  (line-based, tuned to avoid diluting single facts) → `vector-store.service.ts` (Chroma, cosine/HNSW,
-  local embeddings via `@huggingface/transformers`). The raw uploaded file on disk
+  (groups lines into ~70-word chunks, forcing a new chunk at each heading so headings stay attached to
+  their section; chunk ids are positional, which is why `uploadDocument` deletes a file's existing chunks
+  before re-adding) → `vector-store.service.ts` (Chroma, cosine/HNSW,
+  local embeddings via `@huggingface/transformers`). Retrieval is top-8 (`TOP_K` in
+  `knowledge-base-retriever.ts`) — a smaller k silently dropped correct answers on "list every X"
+  questions. The raw uploaded file on disk
   (`apps/api/data/docs/`) and the Chroma vectors are independent — deleting one does not delete the other
   unless you go through `DocumentsService.removeDocument()`, which cleans up both plus bumps the FAQ cache
   version.

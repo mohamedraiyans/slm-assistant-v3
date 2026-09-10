@@ -37,6 +37,10 @@ export class DocumentsService {
     try {
       const text = await extractText(filename, buffer);
       const chunks = chunkDocument(filename, text);
+      // Clear first: chunk ids are positional, so re-uploading a file that now
+      // splits into fewer chunks would otherwise leave the surplus old ones
+      // behind as orphans that still surface in search results.
+      await this.vectorStore.deleteDocument(filename);
       await this.vectorStore.addChunks(chunks);
       await this.faq.invalidateAll();
 

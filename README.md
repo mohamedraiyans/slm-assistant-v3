@@ -97,7 +97,11 @@ slm-assistant-v3/
 
 **Document ingestion & retrieval**
 - Upload PDF or DOCX files; parsed via `pdf-parse` / `mammoth`
-- Line-based chunking (chunk size + overlap tuned to avoid diluting single facts)
+- Section-aware chunking: consecutive lines are grouped into ~70-word chunks and a
+  new chunk is started at each heading, so a heading stays attached to the lines it
+  introduces. (It was one-chunk-per-line, which silently broke structured documents
+  — a résumé's `Education` heading became a contentless chunk that still outranked
+  the entries beneath it, and one of two universities fell below the top-k cutoff.)
 - Chunks embedded locally (no external embedding API call) and stored in Chroma
 - Cosine-similarity top-k retrieval at query time
 

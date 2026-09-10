@@ -8,6 +8,8 @@ export interface KnowledgeBaseDocMetadata extends Record<string, unknown> {
   score: number;
 }
 
+const TOP_K = 8;
+
 @Injectable()
 export class KnowledgeBaseRetriever extends BaseRetriever<KnowledgeBaseDocMetadata> {
   lc_namespace = ['slm', 'retrievers', 'knowledge_base'];
@@ -17,7 +19,9 @@ export class KnowledgeBaseRetriever extends BaseRetriever<KnowledgeBaseDocMetada
   }
 
   async _getRelevantDocuments(query: string): Promise<Document<KnowledgeBaseDocMetadata>[]> {
-    const matches = await this.vectorStore.query(query, 5);
+    // Aggregate questions ("list every X") need more than a handful of chunks —
+    // a hard top-5 silently dropped correct answers that ranked just below it.
+    const matches = await this.vectorStore.query(query, TOP_K);
     return matches.map(
       (m) => new Document({ pageContent: m.text, metadata: { filename: m.filename, score: m.score } }),
     );
