@@ -8,7 +8,10 @@ export interface KnowledgeBaseDocMetadata extends Record<string, unknown> {
   score: number;
 }
 
-const TOP_K = 8;
+// Chunks are ~70 words, so even 12 is a small context window. Aggregate questions
+// ("list every X") need enough slots for several files to be represented at once —
+// see the per-file cap in VectorStoreService.query.
+const TOP_K = 12;
 
 @Injectable()
 export class KnowledgeBaseRetriever extends BaseRetriever<KnowledgeBaseDocMetadata> {
@@ -19,8 +22,6 @@ export class KnowledgeBaseRetriever extends BaseRetriever<KnowledgeBaseDocMetada
   }
 
   async _getRelevantDocuments(query: string): Promise<Document<KnowledgeBaseDocMetadata>[]> {
-    // Aggregate questions ("list every X") need more than a handful of chunks —
-    // a hard top-5 silently dropped correct answers that ranked just below it.
     const matches = await this.vectorStore.query(query, TOP_K);
     return matches.map(
       (m) => new Document({ pageContent: m.text, metadata: { filename: m.filename, score: m.score } }),

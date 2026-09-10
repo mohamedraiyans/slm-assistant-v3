@@ -89,9 +89,11 @@ feature:
   (groups lines into ~70-word chunks, forcing a new chunk at each heading so headings stay attached to
   their section; chunk ids are positional, which is why `uploadDocument` deletes a file's existing chunks
   before re-adding) → `vector-store.service.ts` (Chroma, cosine/HNSW,
-  local embeddings via `@huggingface/transformers`). Retrieval is top-8 (`TOP_K` in
-  `knowledge-base-retriever.ts`) — a smaller k silently dropped correct answers on "list every X"
-  questions. The raw uploaded file on disk
+  local embeddings via `@huggingface/transformers`). Retrieval is top-12 (`TOP_K` in
+  `knowledge-base-retriever.ts`), and `VectorStoreService.query` over-fetches then trims with a per-file
+  cap (`spreadAcrossFiles`) — plain top-k has no notion of document coverage, so one densely on-topic file
+  took *every* slot and hid relevant passages in every other file. Unused slots are backfilled ignoring
+  the cap, so single-document questions still get a full context window. The raw uploaded file on disk
   (`apps/api/data/docs/`) and the Chroma vectors are independent — deleting one does not delete the other
   unless you go through `DocumentsService.removeDocument()`, which cleans up both plus bumps the FAQ cache
   version.

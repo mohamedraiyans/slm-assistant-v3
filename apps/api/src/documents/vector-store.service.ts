@@ -10,6 +10,37 @@ export interface VectorMatch {
   score: number;
 }
 
+// How many candidates to consider before trimming down to topK.
+const POOL_MULTIPLIER = 3;
+// Most chunks any single file may contribute before others get a turn.
+const MAX_PER_FILE = 4;
+
+/**
+ * Trims a relevance-ordered pool to `topK`, capping how many chunks any one file
+ * may contribute so a single densely on-topic document can't crowd out passages
+ * that live in the others. Remaining slots are then filled from the rest of the
+ * pool regardless of file, so a question that genuinely concerns only one
+ * document still gets a full context window.
+ */
+function spreadAcrossFiles(pool: VectorMatch[], topK: number): VectorMatch[] {
+  const chosen = new Set<number>();
+  const perFile = new Map<string, number>();
+
+  for (let i = 0; i < pool.length && chosen.size < topK; i += 1) {
+    const used = perFile.get(pool[i].filename) ?? 0;
+    if (used >= MAX_PER_FILE) continue;
+    chosen.add(i);
+    perFile.set(pool[i].filename, used + 1);
+  }
+
+  for (let i = 0; i < pool.length && chosen.size < topK; i += 1) {
+    chosen.add(i);
+  }
+
+  // Sorting by pool index keeps the original relevance ordering.
+  return [...chosen].sort((a, b) => a - b).map((i) => pool[i]);
+}
+
 @Injectable()
 export class VectorStoreService implements OnModuleInit {
   private client: ChromaClient;
@@ -46,20 +77,25 @@ export class VectorStoreService implements OnModuleInit {
     const count = await this.collection.count();
     if (count === 0) return [];
 
+    // Over-fetch, then trim with a per-file cap: plain top-k has no notion of
+    // document coverage, so one densely on-topic file can take every slot and
+    // hide relevant passages in every other file.
     const results = await this.collection.query({
       queryTexts: [question],
-      nResults: Math.min(topK, count),
+      nResults: Math.min(topK * POOL_MULTIPLIER, count),
     });
 
     const documents = results.documents[0] ?? [];
     const metadatas = results.metadatas[0] ?? [];
     const distances = results.distances[0] ?? [];
 
-    return documents.map((text, i) => ({
+    const pool = documents.map((text, i) => ({
       filename: (metadatas[i]?.filename as string) ?? 'unknown',
       text: text ?? '',
       score: Math.round(Math.max(0, 1 - (distances[i] ?? 1)) * 10000) / 10000,
     }));
+
+    return spreadAcrossFiles(pool, topK);
   }
 
   async hasDocument(filename: string): Promise<boolean> {

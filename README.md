@@ -103,7 +103,11 @@ slm-assistant-v3/
   — a résumé's `Education` heading became a contentless chunk that still outranked
   the entries beneath it, and one of two universities fell below the top-k cutoff.)
 - Chunks embedded locally (no external embedding API call) and stored in Chroma
-- Cosine-similarity top-k retrieval at query time
+- Cosine-similarity retrieval with a per-document cap: results are over-fetched
+  then trimmed so no single file can take every slot. (Plain top-k has no notion
+  of coverage — with three documents uploaded, the one most densely on-topic won
+  *all 8* slots and the other two never reached the LLM at all, so questions
+  spanning documents silently answered from just one of them.)
 
 **Chat**
 - Retrieval goes through `KnowledgeBaseRetriever`, a real LangChain
