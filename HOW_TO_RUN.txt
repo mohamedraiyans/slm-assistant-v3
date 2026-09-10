@@ -152,6 +152,46 @@ provider dropdown in the chat panel populated from whatever admins
 have added; they never see the raw keys.
 
 --------------------------------------------------------------------
+ PART H - RUNNING THE TESTS
+--------------------------------------------------------------------
+
+      cd apps/api
+      npm test                  (76 tests, ~15s)
+      npm run test:cov          (adds a coverage report)
+
+Nothing needs to be running first — no Docker, no dev server, no
+network, no provider API key. Every external dependency (Chroma,
+Redis, Postgres, the LLM) is faked, so this works on a cold machine
+and in CI. Specs live next to the code they cover, as *.spec.ts.
+
+Coverage on the four modules under test is 99.5% of statements and
+100% of functions:
+
+  document-chunker.spec.ts       chunking: headings, word budget,
+                                 overlap, chunk ids, empty input
+  vector-store.service.spec.ts   the per-file retrieval cap
+  faq.service.spec.ts            Redis cache keys + invalidation
+  chat.service.spec.ts           the whole RAG pipeline
+
+Two things to know before you edit a spec:
+
+- Do NOT import a Prisma-backed service into a unit spec without
+  stubbing it. The generated Prisma client sits in apps/api/generated/,
+  which is outside jest's rootDir (src), so it never gets compiled and
+  the suite dies with "Cannot use import statement outside a module".
+  chat.service.spec.ts shows the fix — one jest.mock() line at the top.
+
+- After changing retrieval behaviour, break it on purpose once and
+  confirm a test actually fails. Some chunker properties still pass
+  even when heading detection is disabled, because the heading-merge
+  step reassembles the text either way. The test that genuinely pins
+  section boundaries is "starts a new chunk at a heading even when the
+  budget has room left".
+
+Note `npm test` does NOT touch dist/, so unlike `npx nest build` it is
+safe to run while the dev watcher is going (see PART L).
+
+--------------------------------------------------------------------
  PART I - FAQ CACHE (Redis) & THE "FREQUENTLY ASKED" TAB
 --------------------------------------------------------------------
 
