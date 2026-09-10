@@ -34,7 +34,7 @@ cd apps/web && npx tsc --noEmit
 # Lint / build / test (turbo runs these across all workspaces)
 npx turbo run lint
 npx turbo run build
-npx turbo run test                   # apps/api has jest wired up but no spec files exist yet
+npx turbo run test                   # jest unit suite in apps/api (see Testing below)
 
 # Prisma migration after editing apps/api/prisma/schema.prisma
 cd apps/api && npx prisma migrate dev --name describe_your_change
@@ -49,6 +49,30 @@ reliably triggers this crash. Use `npx tsc --noEmit` for type-checking instead.
 **Env:** exactly one `.env` file at the repo root (gitignored), loaded by both `docker-compose.yml` and
 `apps/api` (via `prisma.config.ts` / `app.module.ts`, since `ConfigModule` points two levels up from
 `apps/api`'s cwd). `apps/web` is the exception — it reads `apps/web/.env.local` instead.
+
+## Testing
+
+Jest + ts-jest, `apps/api` only, `testRegex: .*\.spec\.ts$` with `rootDir: src` — specs live
+next to the code they cover, not in a separate `test/` tree. Everything external is faked, so
+`npm test` needs no Docker, no network and no API key.
+
+Two constraints that are easy to trip over:
+
+- **Never import a Prisma-backed service into a unit spec without stubbing it.** The generated
+  client lives in `apps/api/generated/`, which is *outside* jest's `rootDir`, so ts-jest doesn't
+  transform it and the suite dies on `Cannot use import statement outside a module`. When a class
+  is needed only as a Nest DI token (e.g. `ProvidersService` in `chat.service.spec.ts`), add
+  `jest.mock('../prisma/prisma.service', () => ({ PrismaService: class {} }))`.
+- **Fake the model, not the chain.** `chat.service.spec.ts` uses `FakeListChatModel` from
+  `@langchain/core/utils/testing` so the real `ChatPromptTemplate → model → StringOutputParser`
+  sequence still executes. Assert on prompt contents by spying on the model's `invoke` and casting
+  the first argument to `ChatPromptValue`.
+
+When changing retrieval behaviour, check the change actually fails a test before trusting the
+suite: several chunker properties (e.g. "both universities land in one chunk") survive mutations
+that break real behaviour, because the heading-merge step reassembles runs of headings either way.
+`document-chunker.spec.ts`'s "starts a new chunk at a heading even when the budget has room left"
+is the test that pins section boundaries specifically.
 
 ## Architecture
 

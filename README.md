@@ -198,8 +198,45 @@ slm-assistant-v3/
   use case for it
 - **Persistent chat history**: current per-user memory is in-process and
   resets on server restart — needs a DB-backed store for multi-session history
-- **Automated tests**: no test suite yet (an earlier Python version had full
-  pytest coverage with fakes; this hasn't been ported to the TS rewrite)
+- **End-to-end tests**: the unit suite below covers the retrieval and caching
+  logic; there's no HTTP-level test hitting the real guards/controllers yet
+
+## Tests
+
+```bash
+cd apps/api && npm test          # 76 tests, ~11s, no Docker or network needed
+npm run test:cov                 # coverage report
+```
+
+Jest + ts-jest, unit-level, with every external dependency faked — the suite runs
+without Postgres, Redis, Chroma, or a provider API key, so it's CI-ready as-is.
+
+| Spec | What it pins down |
+|---|---|
+| `document-chunker.spec.ts` | Section/heading grouping, word-budget and overlap bounds, content preservation, positional chunk ids, degenerate input |
+| `vector-store.service.spec.ts` | The per-file cap: coverage across documents, backfill when only one document is relevant, relevance ordering, distance→similarity scoring |
+| `faq.service.spec.ts` | Question normalization, frequency ranking, per-provider cache isolation, version-bump invalidation, the atomic `SET NX` warm lock |
+| `chat.service.spec.ts` | The RAG pipeline end-to-end: cache-hit short-circuit, empty-answer guard, conversation memory, background warming |
+
+Three choices worth calling out:
+
+- **The specs target the bugs that actually shipped.** Two retrieval bugs (a
+  contentless heading chunk outranking real content; one document taking every
+  retrieval slot) were found by hand, so each has a regression test that fails
+  when the fix is reverted — verified by re-introducing all three bugs and
+  confirming distinct tests caught each one.
+- **Only the LLM is faked in the chat tests.** `FakeListChatModel` from
+  `@langchain/core/utils/testing` stands in for the provider, but the
+  `ChatPromptTemplate → model → StringOutputParser` sequence is the real chain,
+  so a broken prompt fails the test rather than passing a mock.
+- **`ChatService`'s cache test asserts absence, not presence** — on a cache hit
+  it checks the retriever and provider factory are *never called*. That's the
+  claim the Redis layer actually makes (repeat questions cost zero API quota),
+  and it's only testable as a negative.
+
+Writing the FAQ spec surfaced a live off-by-one: `currentVersion()` defaulted to
+`1` while Redis `INCR` on a missing key also returns `1`, so the first document
+upload against a fresh Redis invalidated nothing. Fixed, with a regression test.
 
 ## Getting started
 

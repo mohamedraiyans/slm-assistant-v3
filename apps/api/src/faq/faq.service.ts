@@ -78,8 +78,13 @@ export class FaqService {
     return claimed === 'OK';
   }
 
+  /**
+   * Defaults to 0, not 1: `INCR` on a missing key yields 1, so a default of 1 made
+   * the *first* `invalidateAll()` on a fresh Redis a no-op — answers cached before
+   * the first document upload stayed live in the same `v1` namespace.
+   */
   private async currentVersion(): Promise<string> {
-    return (await this.redis.get(CACHE_VERSION_KEY)) ?? '1';
+    return (await this.redis.get(CACHE_VERSION_KEY)) ?? '0';
   }
 
   private async answerKey(provider: ProviderName, question: string): Promise<string> {
