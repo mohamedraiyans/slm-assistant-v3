@@ -283,6 +283,20 @@ optional features, currently just Recitation practice (see PART M).
  PART L - KNOWN GOTCHAS HIT DURING DEVELOPMENT (fixed, but good to know)
 --------------------------------------------------------------------
 
+- If the Recitation page shows "Processing..." after you click
+  Reprocess, that's normal - it switches to Ready by itself. The match
+  percentage is hidden until the new run finishes.
+
+- The speech container runs with `init: true`. Without it, stopping the
+  container mid-transcription once left the server process a zombie
+  that Docker couldn't kill, and the forced cleanup briefly disrupted
+  the other containers. At the same moment the api (in the turbo
+  terminal) exited; restarting Redis and Postgres did NOT reproduce
+  that, so the cause is unconfirmed. If the api is ever down while its
+  watcher is still running, save any file under apps/api/src to make
+  the watcher restart it, and check the terminal for the error above
+  the point where it stopped.
+
 - `docker build` / `docker compose up --build` can fail with "frontend
   grpc server closed unexpectedly". That's Docker Desktop's build
   engine hiccuping, not the Dockerfile - just run the same command
@@ -373,6 +387,10 @@ Speech service checks:
 Tuning (docker-compose.yml, speech service `environment:`):
 - CPU_THREADS: set to your PHYSICAL core count (2 here). Using all 4
   threads, including hyperthreads, was 2.2x SLOWER on this CPU.
+- OMP_NUM_THREADS / OPENBLAS_NUM_THREADS / MKL_NUM_THREADS: keep these
+  equal to CPU_THREADS. Left unset, the audio-feature code starts one
+  thread per logical CPU on top of the decoder's; one run hit 400% CPU
+  and took 326 s for a 36 s file (86 s with them capped).
 - BEAM_SIZE: 5 by default; 1 decodes about twice as fast.
 
 If the speech container shows "unhealthy" while processing, give it a

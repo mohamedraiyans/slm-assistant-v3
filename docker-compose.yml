@@ -48,11 +48,21 @@ services:
       target: runtime
     image: slm-speech:dev
     restart: unless-stopped
+    # Runs a tiny init as PID 1 that forwards stop signals and reaps child processes.
+    # Without it, stopping the container mid-transcription left uvicorn a zombie that
+    # Docker could not kill, and the forced cleanup disrupted the other containers.
+    init: true
     environment:
       # Set to the machine's PHYSICAL core count. On this 2-core/4-thread i3, 2 threads
       # decoded 2.2x faster than 4 (0.85x vs 1.88x real time, measured in both run
       # orders): hyperthreads compete for the same cores on matrix-heavy work.
       CPU_THREADS: "2"
+      # The numeric libraries around the decoder (OpenBLAS for audio features, OpenMP)
+      # otherwise start one thread per LOGICAL CPU, oversubscribing the same 2 cores:
+      # a run with only CPU_THREADS set used 400% CPU and took 9x longer than usual.
+      OMP_NUM_THREADS: "2"
+      OPENBLAS_NUM_THREADS: "2"
+      MKL_NUM_THREADS: "2"
     ports:
       - "8001:8000"
     volumes:

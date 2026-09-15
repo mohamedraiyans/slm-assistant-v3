@@ -61,6 +61,7 @@ interface ReferenceCardProps {
 
 export function ReferenceCard({ reference, isAdmin, onDelete, onReprocess }: ReferenceCardProps) {
   const status = STATUS_STYLES[reference.status];
+  const finished = reference.status === "READY" || reference.status === "FAILED";
   const audioRef = useRef<HTMLAudioElement>(null);
   const stopAtRef = useRef<number | null>(null);
   const [words, setWords] = useState<RecitationWordTiming[] | null>(null);
@@ -163,9 +164,11 @@ export function ReferenceCard({ reference, isAdmin, onDelete, onReprocess }: Ref
         <div className="flex flex-wrap items-center gap-2">
           <span className={`text-xs ${status.className}`}>
             {status.label}
-            {reference.matchRate !== null && ` · ${Math.round(reference.matchRate * 100)}% of words matched`}
+            {/* A reprocess keeps the previous run's score until it finishes; showing it
+                beside "Processing…" would read as the score of the run in progress. */}
+            {finished && reference.matchRate !== null && ` · ${Math.round(reference.matchRate * 100)}% of words matched`}
           </span>
-          {isAdmin && (reference.status === "READY" || reference.status === "FAILED") && (
+          {isAdmin && finished && (
             <Button variant="ghost" size="sm" onClick={() => onReprocess(reference)}>
               Reprocess
             </Button>
