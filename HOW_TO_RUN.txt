@@ -71,12 +71,25 @@ running this is harmless either way) and both apps/api (port 4000)
 and apps/web (port 3000) via Turborepo.
 
 Give the api ~60-90 seconds the first time — it type-checks the whole
-LangChain dependency tree, which is slow. Watch the terminal for:
+LangChain dependency tree, which is slow. After a reboot, or the first
+start in days, it can take several MINUTES (cold disk cache + slow
+drive; even `npx` can take a minute just to launch turbo). That is
+slow, not stuck. Watch the terminal for:
 
       [Nest] ... LOG [NestApplication] Nest application successfully started
 
 Then open http://localhost:3000 — you'll be redirected to /login if
 you're not already signed in.
+
+If you open the page before the api is up, you'll see a "Waiting for
+the API..." screen that reloads itself every 3s until the api is ready,
+and the web log prints this line (expected, NOT an error):
+
+      [web] API not reachable at http://localhost:4000 yet - still starting?
+
+The same brief message appears whenever you save an api file, while
+nest restarts. Only worry if "successfully started" never shows up -
+then look for a real error in the @slm/api:dev lines above it.
 
 --------------------------------------------------------------------
  PART C - HOW TO STOP EVERYTHING

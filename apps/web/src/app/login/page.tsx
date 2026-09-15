@@ -1,11 +1,14 @@
 import { redirect } from "next/navigation";
 import { API_URL } from "@/lib/api";
-import { getCurrentUser } from "@/lib/auth";
+import { getSession } from "@/lib/auth";
+import { ApiUnavailable } from "@/components/api-unavailable";
 import { Button } from "@/components/ui/button";
 
 export default async function LoginPage() {
-  const user = await getCurrentUser();
-  if (user) redirect("/");
+  const session = await getSession();
+  // A sign-in button that points at a dead api would just fail on click.
+  if (session.status === "api-unavailable") return <ApiUnavailable />;
+  if (session.status === "signed-in") redirect("/");
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-4 font-sans">
