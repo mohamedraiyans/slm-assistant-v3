@@ -105,20 +105,29 @@ class TestMistakes:
 
 
 class TestOptionalWords:
-    def test_a_zero_skip_cost_word_is_matched_when_heard(self):
-        result = align(["اعوذ", "بسم"], heard("اعوذ", "بسم"), skip_costs=[0.0, 1.0])
+    def test_an_optional_word_is_matched_when_heard(self):
+        result = align(["اعوذ", "بسم"], heard("اعوذ", "بسم"), optional=[True, False])
         assert matches(result) == [Match.EXACT, Match.EXACT]
 
-    def test_a_zero_skip_cost_word_is_omitted_rather_than_forced_onto_the_next_word(self):
-        # With a normal skip cost this is a tie between "optional word missing" and
-        # "optional word substituted by بسم"; a free skip makes omission strictly better.
-        result = align(["اعوذ", "بسم"], heard("بسم"), skip_costs=[0.0, 1.0])
+    def test_an_optional_word_is_omitted_rather_than_forced_onto_the_next_word(self):
+        result = align(["اعوذ", "بسم"], heard("بسم"), optional=[True, False])
         assert matches(result) == [Match.MISSING, Match.EXACT]
         assert result.words[1].heard.key == "بسم"
 
-    def test_rejects_mismatched_skip_costs(self):
+    def test_an_optional_word_still_accepts_a_spelling_variant(self):
+        result = align(["الرحمن", "بسم"], heard("الرحمان", "بسم"), optional=[True, False])
+        assert matches(result) == [Match.FUZZY, Match.EXACT]
+
+    def test_regression_an_optional_word_cannot_absorb_an_extra_word(self):
+        # مالك is only ~0.5 similar to الله. Substituting it into the optional word cost
+        # 0.5, less than reporting it as extra (1.0), so a repeated word vanished.
+        result = align(["الله", "مالك", "يوم"], heard("مالك", "مالك", "يوم"), optional=[True, False, False])
+        assert [w.key for w in result.inserted] == ["مالك"]
+        assert result.words[0].match == Match.MISSING
+
+    def test_rejects_a_mismatched_optional_list(self):
         with pytest.raises(ValueError):
-            align(["بسم", "الله"], heard("بسم"), skip_costs=[0.0])
+            align(["بسم", "الله"], heard("بسم"), optional=[True])
 
 
 class TestEdgeCases:

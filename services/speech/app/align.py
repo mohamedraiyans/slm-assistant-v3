@@ -84,16 +84,20 @@ def align(
     expected: Sequence[str],
     heard: Sequence[HeardWord],
     band: int | None = None,
-    skip_costs: Sequence[float] | None = None,
+    optional: Sequence[bool] | None = None,
 ) -> Alignment:
     """
-    `skip_costs` optionally overrides, per expected word, the cost of nothing being heard
-    for it. A cost of 0 makes a word optional: matched if present, free to omit. That is
-    how recitation openings (isti'adha, basmala) are modelled without being required.
+    `optional` marks expected words that may be omitted at no cost - how recitation
+    openings (isti'adha, basmala) are modelled without being required.
+
+    An optional word is either skipped or matched as itself (similarity at least
+    FUZZY_THRESHOLD); it can never be "substituted". Otherwise it undercuts real
+    insertions: a stray word only half-similar to one would be absorbed into the
+    optional opening at cost 0.5 instead of being reported as extra at cost 1.
     """
     n, m = len(expected), len(heard)
-    if skip_costs is not None and len(skip_costs) != n:
-        raise ValueError("skip_costs must have one entry per expected word")
+    if optional is not None and len(optional) != n:
+        raise ValueError("optional must have one entry per expected word")
     width = band_half_width(n, m) if band is None else band
 
     def window(i: int) -> tuple[int, int]:
@@ -136,15 +140,14 @@ def align(
                 row_move[k] = _SKIP_HEARD
                 continue
 
+            is_optional = optional is not None and optional[i - 1]
             best, move = _INF, _DIAGONAL
             if prev_cost is not None and prev_lo <= j - 1 <= prev_hi and j >= 1:
-                diagonal = prev_cost[j - 1 - prev_lo] + (
-                    1.0 - sim(expected[i - 1], heard[j - 1].key)
-                )
-                best, move = diagonal, _DIAGONAL
+                score = sim(expected[i - 1], heard[j - 1].key)
+                if not (is_optional and score < FUZZY_THRESHOLD):
+                    best, move = prev_cost[j - 1 - prev_lo] + (1.0 - score), _DIAGONAL
             if prev_cost is not None and prev_lo <= j <= prev_hi:
-                skip = GAP_COST if skip_costs is None else skip_costs[i - 1]
-                up = prev_cost[j - prev_lo] + skip
+                up = prev_cost[j - prev_lo] + (0.0 if is_optional else GAP_COST)
                 if up < best:
                     best, move = up, _SKIP_EXPECTED
             if k >= 1:

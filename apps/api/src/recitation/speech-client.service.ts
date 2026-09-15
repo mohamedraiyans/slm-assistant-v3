@@ -47,9 +47,34 @@ export class SpeechServiceError extends Error {
   }
 }
 
+export interface CheckAttemptRequest {
+  audio: Buffer;
+  mimeType: string;
+  extension: string;
+  surah: number;
+  ayah: number;
+}
+
+export interface CheckAttemptResponse {
+  surah: number;
+  ayah: number;
+  processingSec: number;
+  transcript: string;
+  words: {
+    position: number;
+    text: string;
+    match: RecitationWordMatch;
+    heard: string | null;
+  }[];
+  extraWords: string[];
+}
+
 // Transcription runs at a fraction of real time on CPU, so a whole long surah can
 // legitimately take many minutes.
 const ALIGN_TIMEOUT_MS = 60 * 60 * 1000;
+// One ayah decodes in seconds, but the service handles one recording at a time, so a
+// check can wait behind a reference that is still being processed.
+const ATTEMPT_TIMEOUT_MS = 5 * 60 * 1000;
 
 function detailOf(body: unknown): string | undefined {
   const detail = (body as { detail?: unknown } | null)?.detail;
@@ -74,16 +99,49 @@ export class SpeechClient {
     ).replace(/\/+$/, '');
   }
 
-  async alignReference(
+  alignReference(
     request: AlignReferenceRequest,
   ): Promise<AlignReferenceResponse> {
-    let response: Response;
-    try {
-      response = await fetch(`${this.baseUrl}/v1/references/align`, {
-        method: 'POST',
+    return this.post<AlignReferenceResponse>(
+      '/v1/references/align',
+      {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request),
-        signal: AbortSignal.timeout(ALIGN_TIMEOUT_MS),
+      },
+      ALIGN_TIMEOUT_MS,
+    );
+  }
+
+  /** Checks a recording of one ayah. The audio is forwarded, never stored. */
+  checkAttempt(request: CheckAttemptRequest): Promise<CheckAttemptResponse> {
+    const form = new FormData();
+    form.append(
+      'audio',
+      // Copied into a plain ArrayBuffer-backed view: a Node Buffer may sit on a
+      // SharedArrayBuffer, which Blob does not accept. At most 10 MB.
+      new Blob([new Uint8Array(request.audio)], { type: request.mimeType }),
+      `attempt.${request.extension}`,
+    );
+    form.append('surah', String(request.surah));
+    form.append('ayah', String(request.ayah));
+    return this.post<CheckAttemptResponse>(
+      '/v1/attempts/check',
+      { body: form },
+      ATTEMPT_TIMEOUT_MS,
+    );
+  }
+
+  private async post<T>(
+    path: string,
+    init: Pick<RequestInit, 'headers' | 'body'>,
+    timeoutMs: number,
+  ): Promise<T> {
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseUrl}${path}`, {
+        method: 'POST',
+        ...init,
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (error) {
       throw new SpeechServiceError(
@@ -92,7 +150,7 @@ export class SpeechClient {
       );
     }
 
-    if (response.ok) return (await response.json()) as AlignReferenceResponse;
+    if (response.ok) return (await response.json()) as T;
 
     const body: unknown = await response.json().catch(() => null);
     const detail = detailOf(body) ?? response.statusText;

@@ -193,7 +193,7 @@ slm-assistant-v3/
   looks absent rather than forbidden. Hiding the tab is only the UI half
 - New features default to off, and every toggle records which admin made it
 
-**Recitation practice — phases 1–2 of 5 done (off by default)**
+**Recitation practice — phases 1–3 of 5 done (off by default)**
 - Goal: recite Quran from memory and get corrected live, hearing the
   correct word played back in the reference reciter's own voice
 - Phase 1: a separate "Recitation" tab to upload reference recitations tagged
@@ -244,6 +244,41 @@ How phase 2 works, and the decisions behind it:
   fallback on, a word's result changed between identical runs, which is
   unacceptable for ground-truth data
 
+Phase 3 — **practice: recite an ayah, get corrected in the reciter's voice**:
+
+- **Practice** on any ready recitation: the ayah text is hidden by default
+  (a toggle reveals it), you press record and recite, and recording **stops
+  by itself when you pause**. Mistaken words turn red and the first one is
+  **played back from the reference audio** — the phase 2 timings are what
+  make that possible. Then "Try again" or "Hear the whole ayah"; passing
+  reveals the ayah and moves on
+- **Ayah-by-ayah, chosen by measurement.** Live word-by-word correction was
+  prototyped first (`services/speech/benchmarks/live_latency.py` replays a
+  recording at real-time speed and measures per-word delay against the phase 2
+  ground truth). On this 2-core laptop CPU it measured a **9.1 s median delay**
+  per word. Profiling showed why: decoding **1 s of audio costs the same 2.3 s
+  as 4 s**, because Whisper always encodes a padded 30 s window — so no amount
+  of chunking gets below ~5 s. Checking a whole ayah after a pause needs one
+  decode instead of many. Live correction stays on the roadmap via a CTC model,
+  whose cost scales with audio length
+- **No false corrections from recognizer errors.** The model misheard العالمين
+  even from a professional reciter, so a miss is only called a mistake on words
+  the model recognised correctly *in the reference recording*; elsewhere the
+  word is shown as "not checked". Verified end to end: the correct ayah passes
+  even though العالمين was misheard again
+- **Verified with real audio, through the real API:** clips cut from the
+  reference using its word timings — the correct ayah passes; ayah 2 with رَبِّ
+  removed flags exactly رَبِّ; ayah 7 with الْمَغْضُوبِ removed flags exactly that
+  word; the wrong ayah fails
+- **Practice recordings are never stored** — held in memory, checked, discarded
+- Checks skip Whisper's word-timestamp pass (the correction clip comes from the
+  reference), which measured **2.3–3× faster**. A check decodes in ~2.2 s on an
+  idle machine; on this laptop it's typically 4–12 s, because Chrome alone was
+  using ~2 cores' worth of CPU
+- A real bug found by the tests: optional preamble words could *absorb* a
+  stray word half-similar to them (cost 0.5) instead of reporting it as extra
+  (cost 1). Optional words are now matched only as themselves, never substituted
+
 **UI**
 - Navy/amber theme (CSS variables in `globals.css`) rather than the default
   shadcn grayscale — the login page shows the full constellation wallpaper in
@@ -259,13 +294,12 @@ How phase 2 works, and the decisions behind it:
 
 ## Future features (roadmap)
 
-- **Recitation practice, phases 3–5** — deliberately a deterministic speech
+- **Recitation practice, next steps** — deliberately a deterministic speech
   pipeline, no LLM:
-  - *Phase 3:* live checking. Streamed mic audio is transcribed in overlapping
-    windows (LocalAgreement, from whisper_streaming), words are aligned against
-    the expected ayah, and a wrong, missed, or extra word triggers playback of
-    that word's clip from the reference audio. Latency depends heavily on the
-    CPU; see HOW_TO_RUN part M for measured speeds on this machine
+  - *Live word-by-word correction:* a CTC acoustic model (wav2vec2 family)
+    verifying the next expected word, instead of Whisper re-transcribing a 30 s
+    window each step. Needs a model with trustworthy provenance, then the same
+    latency benchmark and evaluation as Whisper got
   - *Phase 4:* evaluation — word error rate plus mistake-detection
     precision/recall on a labelled set
   - *Phase 5:* LoRA fine-tuning measured against the phase 4 baseline, and an
@@ -292,9 +326,9 @@ How phase 2 works, and the decisions behind it:
 ## Tests
 
 ```bash
-cd apps/api && npm test                      # 163 tests, ~20s, no Docker or network needed
+cd apps/api && npm test                      # 192 tests, ~20s, no Docker or network needed
 npm run test:cov                             # coverage report
-docker build --target test services/speech   # 150 Python tests, run inside the service image
+docker build --target test services/speech   # 170 Python tests, run inside the service image
 ```
 
 Jest + ts-jest, unit-level, with every external dependency faked — the suite runs
@@ -312,6 +346,8 @@ without Postgres, Redis, Chroma, or a provider API key, so it's CI-ready as-is.
 | `recitation.processor.spec.ts` | Job lifecycle: PROCESSING → READY in one transaction, low match rate kept but FAILED, permanent errors skip retries, last retry marks FAILED, deletion mid-job isn't an error |
 | `speech-client.service.spec.ts` | Which HTTP failures are retryable (unreachable, 5xx, 408, 429) vs permanent, timeout presence, FastAPI validation-error flattening, non-JSON bodies |
 | `recitation.service.spec.ts` | Every upload is queued; a Redis outage keeps the upload (FAILED with reason); reprocess refuses to race a running job; unfinished work re-queued on boot |
+| `practice-judge.spec.ts` | Mistake vs "not checked" depending on the reference's own recognition of each word, extra words never failing an attempt, position-based matching, refusing to judge mismatched ayahs |
+| `practice.service.spec.ts` | Validation before any speech call (ayah, recording, readiness, ayah coverage, audio bytes), permanent errors as 400, outages as 503 |
 
 The speech service's pytest suite, in the service image:
 
@@ -322,7 +358,8 @@ The speech service's pytest suite, in the service image:
 | `test_align.py` | Missed/substituted/extra words, openings before the text, **a brute-force O(n²) oracle proving the banded search still finds the optimal alignment** (40 randomised cases), a 6,000-word surah |
 | `test_clips.py` | Clip grouping on real VAD output, snapping word edges to speech, ignoring VAD padding |
 | `test_reference.py` | Timing interpolation for unheard words, match rate, **the isti'adha/basmala regression from a real recording** |
-| `test_api.py` | Path traversal rejected before any file access, invalid ranges rejected before transcribing, camelCase response contract |
+| `test_attempt.py` | Missed, wrong and repeated words in an attempt, opening isti'adha/basmala not counted as extra, silence, the wrong ayah |
+| `test_api.py` | Path traversal rejected before any file access, invalid ranges rejected before transcribing, camelCase response contract, practice checks: decoded from memory and never written to disk, size cap, undecodable audio as 422, fast decode settings |
 
 Both suites were mutation-checked for the regressions they claim to guard: disabling the preamble, narrowing the alignment band, or removing a hamza fold each fails the specific tests named for it.
 

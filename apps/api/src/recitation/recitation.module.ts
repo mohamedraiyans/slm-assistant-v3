@@ -1,6 +1,7 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { FeaturesModule } from '../features/features.module';
+import { PracticeService } from './practice.service';
 import { RECITATION_QUEUE } from './recitation-queue';
 import { RecitationController } from './recitation.controller';
 import { RecitationProcessor } from './recitation.processor';
@@ -13,6 +14,11 @@ import { SpeechClient } from './speech-client.service';
     BullModule.registerQueue({ name: RECITATION_QUEUE }),
   ],
   controllers: [RecitationController],
-  providers: [RecitationService, RecitationProcessor, SpeechClient],
+  providers: [
+    RecitationService,
+    RecitationProcessor,
+    SpeechClient,
+    PracticeService,
+  ],
 })
 export class RecitationModule {}

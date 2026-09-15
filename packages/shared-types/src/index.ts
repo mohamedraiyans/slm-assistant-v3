@@ -104,6 +104,33 @@ export interface RecitationWordTiming {
   estimated: boolean;
 }
 
+/**
+ * CORRECT: recognised as recited. MISTAKE: not recognised, on a word the model reliably
+ * recognises in the reference recording. UNCHECKED: not recognised, but the model also
+ * failed on this word in the reference, so the miss can't be blamed on the reciter.
+ */
+export type PracticeVerdict = "CORRECT" | "MISTAKE" | "UNCHECKED";
+
+export interface PracticeWordResult {
+  position: number;
+  /** Vowelled canonical text */
+  text: string;
+  verdict: PracticeVerdict;
+  /** What the recognizer heard in this word's place, if anything (normalized) */
+  heard: string | null;
+  /** This word's span in the reference audio, for playing the correct recitation */
+  startSec: number;
+  endSec: number;
+}
+
+export interface PracticeAttemptResult {
+  ayah: number;
+  passed: boolean;
+  words: PracticeWordResult[];
+  /** Heard but not part of the ayah. Informational: the recognizer also invents words over silence */
+  extraWords: string[];
+}
+
 export interface ProviderUsageWindow {
   limit: number | null;
   remaining: number | null;

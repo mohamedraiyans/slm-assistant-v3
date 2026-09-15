@@ -14,6 +14,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import type {
+  PracticeAttemptResult,
   RecitationReferenceSummary,
   RecitationWordTiming,
 } from '@slm/shared-types';
@@ -26,16 +27,22 @@ import {
   FeatureGuard,
   RequireFeature,
 } from '../features/require-feature.guard';
+import { PracticeService } from './practice.service';
 import { RecitationService } from './recitation.service';
 
 // A long surah at a typical 64-128 kbps is tens of megabytes.
 const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
+// One ayah of compressed microphone audio; matches the speech service's own cap.
+const MAX_ATTEMPT_BYTES = 10 * 1024 * 1024;
 
 @Controller('recitation/references')
 @UseGuards(JwtAuthGuard, FeatureGuard)
 @RequireFeature('recitation')
 export class RecitationController {
-  constructor(private readonly recitation: RecitationService) {}
+  constructor(
+    private readonly recitation: RecitationService,
+    private readonly practice: PracticeService,
+  ) {}
 
   @Get()
   list(): Promise<RecitationReferenceSummary[]> {
@@ -80,6 +87,21 @@ export class RecitationController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<RecitationWordTiming[]> {
     return this.recitation.listWords(id);
+  }
+
+  /** A practice attempt at one ayah. Any signed-in user; the audio is not stored. */
+  @Post(':id/attempts')
+  @UseInterceptors(
+    FileInterceptor('audio', {
+      limits: { fileSize: MAX_ATTEMPT_BYTES, files: 1 },
+    }),
+  )
+  checkAttempt(
+    @Param('id', ParseUUIDPipe) id: string,
+    @UploadedFile() audio: Express.Multer.File | undefined,
+    @Body('ayah') ayah: unknown,
+  ): Promise<PracticeAttemptResult> {
+    return this.practice.checkAttempt(id, ayah, audio);
   }
 
   @Post(':id/reprocess')

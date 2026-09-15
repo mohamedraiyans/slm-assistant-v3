@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RecitationReferenceSummary } from "@slm/shared-types";
 import { Button } from "@/components/ui/button";
+import { PracticeView } from "./practice-view";
 import { ReferenceCard } from "./reference-card";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
@@ -44,6 +45,7 @@ export function RecitationPanel({ isAdmin }: { isAdmin: boolean }) {
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [wholeSurah, setWholeSurah] = useState(true);
+  const [practicing, setPracticing] = useState<RecitationReferenceSummary | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
 
   const load = useCallback(async () => {
@@ -116,6 +118,10 @@ export function RecitationPanel({ isAdmin }: { isAdmin: boolean }) {
   const uploading = progress !== null;
   const inputClass =
     "w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary disabled:opacity-50";
+
+  if (practicing) {
+    return <PracticeView reference={practicing} onExit={() => setPracticing(null)} />;
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -204,6 +210,7 @@ export function RecitationPanel({ isAdmin }: { isAdmin: boolean }) {
                   isAdmin={isAdmin}
                   onDelete={(r) => void handleDelete(r)}
                   onReprocess={(r) => void handleReprocess(r)}
+                  onPractice={setPracticing}
                 />
               ))}
             </ul>

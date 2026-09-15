@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type {
   RecitationReferenceSummary,
   RecitationStatus,
   RecitationWordTiming,
 } from "@slm/shared-types";
 import { Button } from "@/components/ui/button";
+import { useClipPlayer } from "./use-clip-player";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
@@ -48,25 +49,20 @@ function wordTitle(word: RecitationWordTiming): string {
   return span;
 }
 
-function waitFor(audio: HTMLAudioElement, event: string): Promise<void> {
-  return new Promise((resolve) => audio.addEventListener(event, () => resolve(), { once: true }));
-}
-
 interface ReferenceCardProps {
   reference: RecitationReferenceSummary;
   isAdmin: boolean;
   onDelete: (reference: RecitationReferenceSummary) => void;
   onReprocess: (reference: RecitationReferenceSummary) => void;
+  onPractice: (reference: RecitationReferenceSummary) => void;
 }
 
-export function ReferenceCard({ reference, isAdmin, onDelete, onReprocess }: ReferenceCardProps) {
+export function ReferenceCard({ reference, isAdmin, onDelete, onReprocess, onPractice }: ReferenceCardProps) {
   const status = STATUS_STYLES[reference.status];
   const finished = reference.status === "READY" || reference.status === "FAILED";
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const stopAtRef = useRef<number | null>(null);
   const [words, setWords] = useState<RecitationWordTiming[] | null>(null);
   const [showWords, setShowWords] = useState(false);
-  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const { audioRef, activeIndex, playSpan } = useClipPlayer(words);
 
   // Processed results can exist on a FAILED reference too (a low match rate keeps the
   // words for diagnosis), so this keys off processedAt rather than status.
@@ -89,59 +85,6 @@ export function ReferenceCard({ reference, isAdmin, onDelete, onReprocess }: Ref
   if (seenProcessedAt !== reference.processedAt) {
     setSeenProcessedAt(reference.processedAt);
     setWords(null);
-  }
-
-  // Follows playback on a frame-by-frame basis: timeupdate fires only ~4 times a
-  // second, which is too coarse to highlight words that last a fraction of that.
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio || !words) return;
-    let frame = 0;
-
-    const tick = () => {
-      const time = audio.currentTime;
-      if (stopAtRef.current !== null && time >= stopAtRef.current) {
-        stopAtRef.current = null;
-        audio.pause();
-      }
-      const index = words.findIndex((w) => time >= w.startSec && time < w.endSec);
-      setActiveIndex(index === -1 ? null : index);
-      if (!audio.paused) frame = requestAnimationFrame(tick);
-    };
-    const start = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(tick);
-    };
-    const stop = () => {
-      cancelAnimationFrame(frame);
-      setActiveIndex(null);
-    };
-
-    audio.addEventListener("play", start);
-    audio.addEventListener("pause", stop);
-    audio.addEventListener("ended", stop);
-    return () => {
-      cancelAnimationFrame(frame);
-      audio.removeEventListener("play", start);
-      audio.removeEventListener("pause", stop);
-      audio.removeEventListener("ended", stop);
-    };
-  }, [words]);
-
-  async function playWord(word: RecitationWordTiming) {
-    const audio = audioRef.current;
-    if (!audio) return;
-    // preload="none" means nothing is loaded yet on first click; seeking before
-    // metadata arrives is silently ignored by browsers.
-    if (audio.readyState < HTMLMediaElement.HAVE_METADATA) {
-      audio.preload = "auto";
-      const loaded = waitFor(audio, "loadedmetadata");
-      audio.load();
-      await loaded;
-    }
-    stopAtRef.current = word.endSec;
-    audio.currentTime = word.startSec;
-    await audio.play().catch(() => undefined);
   }
 
   const ayahs = new Map<number, { word: RecitationWordTiming; index: number }[]>();
@@ -168,6 +111,11 @@ export function ReferenceCard({ reference, isAdmin, onDelete, onReprocess }: Ref
                 beside "Processing…" would read as the score of the run in progress. */}
             {finished && reference.matchRate !== null && ` · ${Math.round(reference.matchRate * 100)}% of words matched`}
           </span>
+          {reference.status === "READY" && (
+            <Button size="sm" onClick={() => onPractice(reference)}>
+              Practice
+            </Button>
+          )}
           {isAdmin && finished && (
             <Button variant="ghost" size="sm" onClick={() => onReprocess(reference)}>
               Reprocess
@@ -217,7 +165,7 @@ export function ReferenceCard({ reference, isAdmin, onDelete, onReprocess }: Ref
                     <button
                       key={`${word.ayah}:${word.position}`}
                       type="button"
-                      onClick={() => void playWord(word)}
+                      onClick={() => void playSpan(word.startSec, word.endSec)}
                       title={wordTitle(word)}
                       className={wordClass(word, activeIndex === index)}
                     >

@@ -134,3 +134,35 @@ describe('SpeechClient', () => {
     expect(error.retryable).toBe(true);
   });
 });
+
+describe('SpeechClient.checkAttempt', () => {
+  const ATTEMPT = {
+    audio: Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3]),
+    mimeType: 'audio/webm',
+    extension: 'webm',
+    surah: 1,
+    ayah: 2,
+  };
+
+  it('sends the recording and ayah as multipart form data', async () => {
+    const fetchSpy = respond(200, { words: [], extraWords: [] });
+    await client('http://speech:8000').checkAttempt(ATTEMPT);
+
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toBe('http://speech:8000/v1/attempts/check');
+    const form = init?.body as FormData;
+    expect(form).toBeInstanceOf(FormData);
+    expect(form.get('surah')).toBe('1');
+    expect(form.get('ayah')).toBe('2');
+    const file = form.get('audio') as File;
+    expect(file.type).toBe('audio/webm');
+    expect(Buffer.from(await file.arrayBuffer())).toEqual(ATTEMPT.audio);
+  });
+
+  it('classifies attempt errors the same way as alignment errors', async () => {
+    respond(422, { detail: 'could not decode audio' });
+    const error = await errorFrom(client().checkAttempt(ATTEMPT));
+    expect(error.retryable).toBe(false);
+    expect(error.message).toContain('could not decode audio');
+  });
+});

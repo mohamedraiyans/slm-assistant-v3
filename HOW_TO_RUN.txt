@@ -340,9 +340,27 @@ optional features, currently just Recitation practice (see PART M).
  PART M - RECITATION PRACTICE (optional feature, OFF by default)
 --------------------------------------------------------------------
 
-Status: phases 1-2 of 5 - upload a reference recitation; it is aligned
-to the Quran text automatically, and clicking any word plays exactly
-that word. Checking YOUR recitation comes in phase 3 (see README).
+Status: phases 1-3 - upload a reference recitation; it is aligned to
+the Quran text automatically; then PRACTICE against it and get
+corrected in the reciter's voice.
+
+Practising:
+  1. On a "Ready" recitation, click "Practice".
+  2. The ayah is hidden (tick "Show text" to read along). Click
+     "Record ayah N" and recite. Recording stops by itself when you
+     pause for about 1.5 s (or press Stop). Allow the microphone when
+     the browser asks.
+  3. Wrong words turn red and the first one plays in the reciter's
+     voice. Click any word to hear it, "Hear the whole ayah", then
+     "Try again". When you pass, "Next ayah".
+  Grey words are "not checked": the recognizer also mishears that word
+  in the reference recording, so it is never counted against you.
+  Your recordings are not saved anywhere.
+
+  A check takes ~2 s on an idle machine, but typically 4-12 s on this
+  laptop - close heavy browser tabs if it feels slow. It is ayah-by-
+  ayah rather than word-by-word on purpose: live correction measured a
+  ~9 s delay per word on this CPU (README explains why).
 
 Turn it on: sign in as ADMIN -> "Features" -> switch on "Recitation
 practice". An "Assistant | Recitation" switcher then appears in the
@@ -391,7 +409,13 @@ Tuning (docker-compose.yml, speech service `environment:`):
   equal to CPU_THREADS. Left unset, the audio-feature code starts one
   thread per logical CPU on top of the decoder's; one run hit 400% CPU
   and took 326 s for a 36 s file (86 s with them capped).
-- BEAM_SIZE: 5 by default; 1 decodes about twice as fast.
+- BEAM_SIZE: 5 by default for processing uploads; 1 decodes about
+  twice as fast.
+- ATTEMPT_BEAM_SIZE: 1 by default for practice checks (someone is
+  waiting); it matched beam 5's accuracy on Al-Fatiha.
+- Measure live-checking latency on a machine (inside the container):
+    docker cp services/speech/benchmarks slm-assistant-v3-speech-1:/tmp/b
+    (see the docstring in benchmarks/live_latency.py for the command)
 
 If the speech container shows "unhealthy" while processing, give it a
 minute: transcription uses every core, and the health check is

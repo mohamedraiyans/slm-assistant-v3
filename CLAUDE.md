@@ -150,6 +150,11 @@ feature:
   retries). A result below `MIN_MATCH_RATE` is stored but marked FAILED — it usually means the wrong surah
   or range. `RecitationService.onApplicationBootstrap` re-queues anything left PENDING/PROCESSING.
   Deliberately no LLM in this pipeline.
+  Practice (phase 3): `POST /recitation/references/:id/attempts` (multipart `audio` + `ayah`, any signed-in
+  user) → `PracticeService` → speech service `/v1/attempts/check`, synchronous, audio never stored.
+  `practice-judge.ts` decides verdicts: a missed word is a MISTAKE only if the *reference's* own alignment
+  recognised that word (EXACT/FUZZY); otherwise UNCHECKED — this is what stops recognizer errors becoming
+  false corrections, so don't simplify it away. Checking is per-ayah, not live, by measurement (see README).
 
 ### Speech service (`services/speech`, Python/FastAPI)
 
@@ -167,8 +172,14 @@ only accepts a uuid-shaped `storedName` (it's joined onto a directory path).
 - `transcribe.py` decodes pause-separated clips grouped to ≤15 s via `clip_timestamps`. Don't swap this for
   faster-whisper's `vad_filter` — that rejoins speech into one stream and measured no better than no VAD
   (whole-window decoding dropped Al-Fatiha's basmala). Temperature is fixed at 0 for reproducibility.
-- `align.py` is a banded Needleman–Wunsch; `skip_costs` of 0 mark optional words. `reference.py` uses that
-  for the isti'adha/basmala preamble — needed because الرجيم/الرحيم differ by one letter.
+- `align.py` is a banded Needleman–Wunsch; `optional` words cost nothing to skip and may only match as
+  themselves (≥ FUZZY_THRESHOLD), never be substituted — otherwise they absorb real extra words.
+  `reference.align_recitation` uses that for the isti'adha/basmala preamble (needed because الرجيم/الرحيم
+  differ by one letter) and is shared by reference processing and `attempt.py`.
+- `transcribe(..., word_timestamps=False)` is used for practice checks: the timestamp pass costs 2.3–3× the
+  decode and checking only needs word order. Whisper has a ~2.3 s floor per decode on this CPU regardless
+  of audio length (30 s padded window) — `benchmarks/live_latency.py` is how that was measured.
+- `/v1/attempts/check` requires `python-multipart` (pinned in requirements.txt) for form uploads.
 - `data/quran-simple.txt` is Tanzil's text, which its license forbids modifying: `.gitattributes` exempts it
   from line-ending conversion. Never edit or reformat it.
 - **`users/`** — admin-only list/delete. `Document.uploadedBy` and `ProviderCredential.createdBy` are

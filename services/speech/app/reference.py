@@ -90,17 +90,19 @@ def time_reference(
     )
 
 
-def build_reference_timing(
-    expected: list[QuranWord], heard: Sequence[HeardWord], duration: float
-) -> ReferenceTiming:
+def align_recitation(expected: list[QuranWord], heard: Sequence[HeardWord]) -> Alignment:
+    """
+    Aligns heard words to canonical ones, letting an opening isti'adha/basmala be
+    recited without counting as extra words. The result has exactly one entry per
+    canonical word, indexed into `expected`; preamble entries are dropped.
+    """
     preamble = opening_preamble(expected)
     keys = preamble + [w.key for w in expected]
-    skip_costs = [0.0] * len(preamble) + [1.0] * len(expected)
-    full = align(keys, heard, skip_costs=skip_costs)
+    optional = [True] * len(preamble) + [False] * len(expected)
+    full = align(keys, heard, optional=optional)
 
-    # Drop the preamble's own entries; only the canonical words are reported.
     offset = len(preamble)
-    canonical = Alignment(
+    return Alignment(
         words=[
             AlignedWord(w.expected_index - offset, w.match, w.heard)
             for w in full.words
@@ -108,4 +110,9 @@ def build_reference_timing(
         ],
         inserted=full.inserted,
     )
-    return time_reference(expected, canonical, duration)
+
+
+def build_reference_timing(
+    expected: list[QuranWord], heard: Sequence[HeardWord], duration: float
+) -> ReferenceTiming:
+    return time_reference(expected, align_recitation(expected, heard), duration)
