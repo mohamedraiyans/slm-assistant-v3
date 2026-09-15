@@ -15,13 +15,18 @@ before debugging anything that looks like infra flakiness.
 
 ## Commands
 
-This is a Turborepo/npm-workspaces monorepo (`apps/api`, `apps/web`, `packages/shared-types`).
+This is a Turborepo/npm-workspaces monorepo (`apps/api`, `apps/web`, `packages/shared-types`), plus a
+Python service in `services/speech` that is *not* an npm workspace — it builds and runs via Docker.
 
 ```bash
 # One-time setup
 npm install                          # installs all three workspaces
-docker compose up -d                 # Postgres, Redis, Chroma, Adminer
+docker compose up -d                 # Postgres, Redis, Chroma, Adminer, speech (first build: 10+ min)
 cd apps/api && npx prisma migrate dev
+
+# Speech service (services/speech)
+docker build --target test services/speech          # runs the pytest suite inside the image
+docker compose up -d --build --no-deps speech       # rebuild + restart after changing app/ code
 
 # Every session
 docker compose up -d
@@ -68,6 +73,14 @@ Two constraints that are easy to trip over:
   `@langchain/core/utils/testing` so the real `ChatPromptTemplate → model → StringOutputParser`
   sequence still executes. Assert on prompt contents by spying on the model's `invoke` and casting
   the first argument to `ChatPromptValue`.
+
+- **`@nestjs/bullmq` must stay on 11.x while Nest is on 11.** v12 is ESM-only (built for Nest 12): it
+  still loads at runtime on Node 24 via `require(esm)`, but jest can't parse it, so every spec touching
+  the processor fails with `Unexpected token 'export'`.
+
+The speech service's pytest suite (`services/speech/tests`) has the same no-network rule. Its pure modules
+(`normalize`, `quran`, `align`, `clips`, `reference`) never import `faster_whisper`, so they also run on a
+host Python with only pytest installed; `test_api.py` skips itself there and runs in the Docker test stage.
 
 When changing retrieval behaviour, check the change actually fails a test before trusting the
 suite: several chunker properties (e.g. "both universities land in one chunk") survive mutations
@@ -127,12 +140,37 @@ feature:
   `@UseGuards(JwtAuthGuard, FeatureGuard)` + `@RequireFeature('key')` — auth guard first, so anonymous
   callers get 401 and signed-in callers get 404 when the feature is off. The web hides the tab too, but the
   guard is the actual switch.
-- **`recitation/`** — recitation practice, phase 1 of 5 (see README roadmap): reference audio upload/list/
-  stream/delete under `/recitation/references`, feature-gated. Audio type comes from `detectAudioFormat`
-  (magic bytes), never the extension or client MIME; files live in `apps/api/data/recitations/` under uuid
-  names; `toSummary` is an explicit allowlist so `storedName` never reaches responses. `status` starts
-  `PENDING` — nothing processes recordings until the planned Python speech service exists. Deliberately no
-  LLM in this pipeline.
+- **`recitation/`** — recitation practice, phases 1–2 of 5 (see README): reference audio upload/list/
+  stream/delete/reprocess and per-word timings under `/recitation/references`, feature-gated. Audio type
+  comes from `detectAudioFormat` (magic bytes), never the extension or client MIME; files live in
+  `apps/api/data/recitations/` under uuid names; `toSummary` is an explicit allowlist so `storedName` never
+  reaches responses. Upload enqueues a BullMQ job (`recitation-queue.ts`, job id `align-<referenceId>` so
+  re-adding is a no-op); `RecitationProcessor` (concurrency 1) calls `SpeechClient`, which classifies
+  failures as retryable (unreachable/5xx/408/429) or permanent (other 4xx → `UnrecoverableError`, no
+  retries). A result below `MIN_MATCH_RATE` is stored but marked FAILED — it usually means the wrong surah
+  or range. `RecitationService.onApplicationBootstrap` re-queues anything left PENDING/PROCESSING.
+  Deliberately no LLM in this pipeline.
+
+### Speech service (`services/speech`, Python/FastAPI)
+
+Stateless: the api owns files, jobs and results; this service only reads audio from the shared bind mount
+(`apps/api/data/recitations` → `/data/recitations:ro`) and returns timed words. `POST /v1/references/align`
+only accepts a uuid-shaped `storedName` (it's joined onto a directory path).
+
+- `convert_model.py` runs in a Docker build stage: official `tarteel-ai/whisper-base-ar-quran` pinned to a
+  commit, plus `openai/whisper-base`'s generation config (for its alignment heads), converted to CTranslate2
+  int8. torch/transformers never reach the runtime image. `PROVENANCE.json` travels with the model.
+- `normalize.py` is for matching only, never display. Code points are written numerically on purpose —
+  literal combining marks are invisible in editors (and a file-writing tool silently turned `\u` escapes
+  into literals once). Changing it: re-verify that vowelled and plain Tanzil editions still give 0 key
+  mismatches across all 78,248 words.
+- `transcribe.py` decodes pause-separated clips grouped to ≤15 s via `clip_timestamps`. Don't swap this for
+  faster-whisper's `vad_filter` — that rejoins speech into one stream and measured no better than no VAD
+  (whole-window decoding dropped Al-Fatiha's basmala). Temperature is fixed at 0 for reproducibility.
+- `align.py` is a banded Needleman–Wunsch; `skip_costs` of 0 mark optional words. `reference.py` uses that
+  for the isti'adha/basmala preamble — needed because الرجيم/الرحيم differ by one letter.
+- `data/quran-simple.txt` is Tanzil's text, which its license forbids modifying: `.gitattributes` exempts it
+  from line-ending conversion. Never edit or reformat it.
 - **`users/`** — admin-only list/delete. `Document.uploadedBy` and `ProviderCredential.createdBy` are
   nullable with `onDelete: SetNull` specifically so deleting a user doesn't cascade-delete shared team
   resources (documents, provider keys) — it just clears the attribution.

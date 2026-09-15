@@ -19,6 +19,9 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    # Redis also backs the BullMQ job queue; evicting keys under memory pressure would
+    # silently drop queued jobs. noeviction is the image default, pinned here on purpose.
+    command: ["redis-server", "--maxmemory-policy", "noeviction"]
     ports:
       - "6379:6379"
     volumes:
@@ -36,6 +39,25 @@ services:
       - "8000:8000"
     volumes:
       - chroma-data:/data
+
+  # Speech recognition + Quran text alignment for recitation practice. Built from
+  # services/speech; the first build converts the model and takes several minutes.
+  speech:
+    build:
+      context: ./services/speech
+      target: runtime
+    image: slm-speech:dev
+    restart: unless-stopped
+    environment:
+      # Set to the machine's PHYSICAL core count. On this 2-core/4-thread i3, 2 threads
+      # decoded 2.2x faster than 4 (0.85x vs 1.88x real time, measured in both run
+      # orders): hyperthreads compete for the same cores on matrix-heavy work.
+      CPU_THREADS: "2"
+    ports:
+      - "8001:8000"
+    volumes:
+      # The api (running on the host) writes uploads here; the service only reads them.
+      - ./apps/api/data/recitations:/data/recitations:ro
 
   adminer:
     image: adminer:latest

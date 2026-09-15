@@ -82,6 +82,26 @@ export interface RecitationReferenceSummary {
   status: RecitationStatus;
   uploadedBy: string | null;
   createdAt: string;
+  durationSec: number | null;
+  /** Share (0-1) of the canonical words recognised in the audio; null until processed */
+  matchRate: number | null;
+  processingError: string | null;
+  processedAt: string | null;
+}
+
+export type RecitationWordMatch = "EXACT" | "FUZZY" | "SUBSTITUTED" | "MISSING";
+
+export interface RecitationWordTiming {
+  ayah: number;
+  /** 1-based within the ayah, spoken words only */
+  position: number;
+  /** Vowelled canonical text */
+  text: string;
+  startSec: number;
+  endSec: number;
+  match: RecitationWordMatch;
+  /** Timing interpolated from neighbouring words rather than observed */
+  estimated: boolean;
 }
 
 export interface ProviderUsageWindow {

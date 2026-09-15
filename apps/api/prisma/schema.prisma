@@ -68,7 +68,40 @@ model RecitationReference {
   uploader     User?            @relation(fields: [uploadedBy], references: [id], onDelete: SetNull)
   createdAt    DateTime         @default(now())
 
+  // Filled in by the speech service. modelId + modelRevision record exactly which
+  // model produced the timings, so a model upgrade can find and reprocess stale ones.
+  durationSec     Float?
+  matchRate       Float?   // share of canonical words recognised in the audio
+  processingError String?
+  modelId         String?
+  modelRevision   String?
+  processedAt     DateTime?
+  words           RecitationWord[]
+
   @@index([surah])
+}
+
+enum RecitationWordMatch {
+  EXACT
+  FUZZY        // recited correctly, spelled differently by the recognizer
+  SUBSTITUTED  // something else was heard where this word belongs
+  MISSING      // nothing was heard; timing is interpolated from neighbours
+}
+
+// One canonical word of a reference recitation, with where it is heard in the audio.
+model RecitationWord {
+  id          String              @id @default(uuid())
+  referenceId String
+  reference   RecitationReference @relation(fields: [referenceId], references: [id], onDelete: Cascade)
+  ayah        Int
+  position    Int                 // 1-based within the ayah, spoken words only
+  text        String              // vowelled canonical text, for display
+  startSec    Float
+  endSec      Float
+  match       RecitationWordMatch
+  estimated   Boolean
+
+  @@unique([referenceId, ayah, position])
 }
 
 model Document {

@@ -10,11 +10,13 @@ This project currently has these pieces:
                   rate limiting is a separate, still-unused use case for it.
   3. Vector DB   (Chroma, runs inside Docker)
   4. Adminer     (Postgres web UI, runs inside Docker) -> http://localhost:8081
-  5. Backend     (NestJS, TypeScript)          -> http://localhost:4000
-  6. Frontend    (Next.js App Router)          -> http://localhost:3000
+  5. Speech      (Python speech recognition for recitation practice,
+                  runs inside Docker)                   -> http://localhost:8001
+  6. Backend     (NestJS, TypeScript)          -> http://localhost:4000
+  7. Frontend    (Next.js App Router)          -> http://localhost:3000
 
 Both the backend and frontend run on your host machine via Turborepo
-(`turbo dev`), NOT inside Docker. Only the four services above run in
+(`turbo dev`), NOT inside Docker. Only the five services above run in
 Docker. Phase 3 of the roadmap will containerize the app itself and
 move everything to Kubernetes — until then, this is the setup.
 
@@ -51,6 +53,9 @@ A1. Install Docker Desktop, open it, wait for it to fully start.
 A2. From the project root: `npm install` (installs all three
     workspaces: apps/api, apps/web, packages/shared-types).
 A3. `docker compose up -d`
+    The FIRST run also builds the speech service image: it downloads
+    PyTorch and the Quran speech model and converts it, which takes
+    10+ minutes and ~1 GB of downloads. Later runs reuse the image.
 A4. `cd apps/api && npx prisma migrate dev` (creates/updates tables)
 
 That's it for one-time setup. From now on, every session, you only
@@ -278,6 +283,16 @@ optional features, currently just Recitation practice (see PART M).
  PART L - KNOWN GOTCHAS HIT DURING DEVELOPMENT (fixed, but good to know)
 --------------------------------------------------------------------
 
+- `docker build` / `docker compose up --build` can fail with "frontend
+  grpc server closed unexpectedly". That's Docker Desktop's build
+  engine hiccuping, not the Dockerfile - just run the same command
+  again.
+
+- The Redis service now has an explicit `command:` (noeviction, because
+  the job queue relies on Redis never dropping keys). The first
+  `docker compose up -d` after this change recreates the Redis
+  container once. Its data volume is kept, so the FAQ cache survives.
+
 - The local embedding model (Xenova/all-MiniLM-L6-v2, used to embed
   uploaded documents for Chroma) downloads once on first use to
   node_modules/@huggingface/transformers/.cache/. If that download
@@ -311,9 +326,9 @@ optional features, currently just Recitation practice (see PART M).
  PART M - RECITATION PRACTICE (optional feature, OFF by default)
 --------------------------------------------------------------------
 
-Status: phase 1 of 5 - you can upload and play reference recitations.
-Checking your own recitation comes in the later phases (see README
-roadmap).
+Status: phases 1-2 of 5 - upload a reference recitation; it is aligned
+to the Quran text automatically, and clicking any word plays exactly
+that word. Checking YOUR recitation comes in phase 3 (see README).
 
 Turn it on: sign in as ADMIN -> "Features" -> switch on "Recitation
 practice". An "Assistant | Recitation" switcher then appears in the
@@ -331,8 +346,43 @@ Worth knowing:
 - Files are stored at apps/api/data/recitations/ under generated uuid
   names (the original filename is kept only for display). That folder
   is gitignored and excluded from the api watcher, like data/docs/.
-- New uploads show "Waiting for processing" - that's expected until
-  the speech service (phase 2) exists to process them.
+What happens after upload:
+  "Queued" -> "Processing..." -> "Ready · 93% of words matched"
+The page updates by itself. Behind it: a background job (BullMQ, on
+Redis) sends the file to the speech service container (port 8001),
+which transcribes it and aligns every word to the Quran text. Then
+"Show words" lists the vowelled text; click a word to hear it.
+
+Speed on THIS laptop (Core i3-7100U, 2 cores): about real time, e.g. a
+36 s surah takes ~36 s. A long surah takes as long as its recording.
+
+If a recitation shows "Failed":
+- "Speech service unreachable" - the speech container isn't running.
+  `docker compose up -d`, then click Reprocess (admin).
+- "Only N% of the expected words were recognised" - usually the wrong
+  surah number or ayah range for that file. Delete and re-upload with
+  the right numbers.
+- Failed jobs retry automatically 3 times (15s, 30s apart) before
+  showing Failed; a wrong ayah range fails at once, since retrying
+  can't fix it.
+
+Speech service checks:
+  curl http://localhost:8001/health      (model revision, verse count)
+  docker compose logs -f speech          (one line per processed file)
+
+Tuning (docker-compose.yml, speech service `environment:`):
+- CPU_THREADS: set to your PHYSICAL core count (2 here). Using all 4
+  threads, including hyperthreads, was 2.2x SLOWER on this CPU.
+- BEAM_SIZE: 5 by default; 1 decodes about twice as fast.
+
+If the speech container shows "unhealthy" while processing, give it a
+minute: transcription uses every core, and the health check is
+deliberately lenient about that.
+
+After changing anything under services/speech/app:
+  docker compose up -d --build --no-deps speech
+Run its tests (inside Docker, ~1 min):
+  docker build --target test services/speech
 
 --------------------------------------------------------------------
  QUICK REFERENCE - command-only cheat sheet
@@ -352,6 +402,8 @@ Worth knowing:
   API:                      http://localhost:4000
   API health check:         http://localhost:4000/health
   Chroma:                   http://localhost:8000
+  Speech service health:    http://localhost:8001/health
+  Speech service tests:     docker build --target test services/speech
   Adminer (DB browser):     http://localhost:8081
   Postgres (psql via Docker): docker compose exec postgres psql -U slm -d slm
   Redis (cli via Docker):     docker compose exec redis redis-cli

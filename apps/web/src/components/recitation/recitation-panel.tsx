@@ -1,29 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { RecitationReferenceSummary, RecitationStatus } from "@slm/shared-types";
+import type { RecitationReferenceSummary } from "@slm/shared-types";
 import { Button } from "@/components/ui/button";
+import { ReferenceCard } from "./reference-card";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 const ACCEPTED_AUDIO = ".mp3,.aac,.wav,.flac,.ogg,.opus,.m4a,.webm,audio/*";
-
-const STATUS_STYLES: Record<RecitationStatus, { label: string; className: string }> = {
-  PENDING: { label: "Waiting for processing", className: "text-muted-foreground" },
-  PROCESSING: { label: "Processing…", className: "text-amber-300" },
-  READY: { label: "Ready", className: "text-emerald-400" },
-  FAILED: { label: "Failed", className: "text-destructive" },
-};
-
-function formatSize(bytes: number): string {
-  return bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)} MB` : `${Math.ceil(bytes / 1024)} KB`;
-}
-
-function describeRange(ref: RecitationReferenceSummary): string {
-  if (ref.ayahStart === null) return `Surah ${ref.surah} · whole surah`;
-  return ref.ayahStart === ref.ayahEnd
-    ? `Surah ${ref.surah} · ayah ${ref.ayahStart}`
-    : `Surah ${ref.surah} · ayahs ${ref.ayahStart}–${ref.ayahEnd}`;
-}
+const POLL_MS = 3000;
 
 /** Nest errors carry `message` as a string or, for validation, a string array. */
 function errorMessage(body: unknown, status: number): string {
@@ -77,6 +61,25 @@ export function RecitationPanel({ isAdmin }: { isAdmin: boolean }) {
       cancelled = true;
     };
   }, []);
+
+  // Processing happens in a background job, so poll while anything is unfinished and
+  // stop as soon as nothing is, rather than polling forever.
+  const hasUnfinished = references.some((ref) => ref.status === "PENDING" || ref.status === "PROCESSING");
+  useEffect(() => {
+    if (!hasUnfinished) return;
+    const timer = setInterval(() => void load(), POLL_MS);
+    return () => clearInterval(timer);
+  }, [hasUnfinished, load]);
+
+  async function handleReprocess(ref: RecitationReferenceSummary) {
+    setError(null);
+    const res = await fetch(`${API_URL}/recitation/references/${ref.id}/reprocess`, {
+      method: "POST",
+      credentials: "include",
+    });
+    if (!res.ok) setError(`Couldn't reprocess "${ref.title}" (${res.status})`);
+    await load();
+  }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -194,31 +197,15 @@ export function RecitationPanel({ isAdmin }: { isAdmin: boolean }) {
             </p>
           ) : (
             <ul className="flex flex-col gap-3">
-              {references.map((ref) => {
-                const status = STATUS_STYLES[ref.status];
-                return (
-                  <li key={ref.id} className="flex flex-col gap-3 rounded-xl border border-border bg-card/60 p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="truncate font-medium">{ref.title}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {describeRange(ref)} · {formatSize(ref.sizeBytes)} · {ref.originalName}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className={`text-xs ${status.className}`}>{status.label}</span>
-                        {isAdmin && (
-                          <Button variant="ghost" size="sm" onClick={() => void handleDelete(ref)}>
-                            Delete
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                    {/* preload="none": a page of whole-surah files shouldn't start downloading until played. */}
-                    <audio controls preload="none" src={`${API_URL}/recitation/references/${ref.id}/audio`} className="w-full" />
-                  </li>
-                );
-              })}
+              {references.map((ref) => (
+                <ReferenceCard
+                  key={ref.id}
+                  reference={ref}
+                  isAdmin={isAdmin}
+                  onDelete={(r) => void handleDelete(r)}
+                  onReprocess={(r) => void handleReprocess(r)}
+                />
+              ))}
             </ul>
           )}
         </section>

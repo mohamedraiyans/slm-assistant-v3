@@ -13,7 +13,10 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
-import type { RecitationReferenceSummary } from '@slm/shared-types';
+import type {
+  RecitationReferenceSummary,
+  RecitationWordTiming,
+} from '@slm/shared-types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -70,6 +73,22 @@ export class RecitationController {
           .json({ statusCode: 404, message: 'Audio file missing' });
       }
     });
+  }
+
+  @Get(':id/words')
+  words(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<RecitationWordTiming[]> {
+    return this.recitation.listWords(id);
+  }
+
+  @Post(':id/reprocess')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
+  reprocess(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<RecitationReferenceSummary> {
+    return this.recitation.reprocessReference(id);
   }
 
   @Delete(':id')

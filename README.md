@@ -24,7 +24,9 @@ multi-tenant architecture with proper auth, RBAC, and a real vector store.
 | Auth | Google OAuth2 (Passport) + JWT (httpOnly cookie), role-based access control |
 | Secrets | AES-256-GCM encrypted provider API keys at rest |
 | Document parsing | `pdf-parse`, `mammoth` (DOCX) |
-| Infra (local dev) | Docker Compose — Postgres, Redis, Chroma, Adminer |
+| Speech recognition | Python FastAPI service: `faster-whisper` (CTranslate2, int8, CPU) running `tarteel-ai/whisper-base-ar-quran`, converted from the pinned official checkpoint at image build time |
+| Background jobs | BullMQ on the existing Redis — retries with backoff, permanent-vs-transient failure handling |
+| Infra (local dev) | Docker Compose — Postgres, Redis, Chroma, Adminer, speech service |
 
 ## Project structure
 
@@ -46,7 +48,8 @@ slm-assistant-v3/
 │   │       ├── redis/             Global module providing the shared ioredis client
 │   │       ├── features/          Admin feature flags + FeatureGuard (404 when off)
 │   │       ├── recitation/        Recitation practice: reference audio upload,
-│   │       │                      byte-level format detection, Range streaming
+│   │       │                      byte-level format detection, Range streaming,
+│   │       │                      BullMQ processor calling the speech service
 │   │       ├── quiz/              Scaffolded — not implemented yet
 │   │       ├── eval/              Scaffolded — not implemented yet
 │   │       └── health/            Health check endpoint
@@ -66,7 +69,12 @@ slm-assistant-v3/
 ├── packages/
 │   └── shared-types/               Types shared between api and web (Role,
 │                                    ProviderName, AuthUser, ChatMessage, ...)
-├── docker-compose.yml               Postgres, Redis, Chroma, Adminer
+├── services/
+│   └── speech/                     Python speech service (port 8001): model
+│       │                            conversion, Arabic normalization, Quran text,
+│       │                            banded word alignment, pytest suite
+│       └── data/quran-simple.txt   Tanzil Quran text (verbatim, CC BY 3.0)
+├── docker-compose.yml               Postgres, Redis, Chroma, Adminer, speech
 ├── CLAUDE.md                        Commands + architecture map for Claude Code
 └── HOW_TO_RUN.txt                   Full local setup + troubleshooting guide
 ```
@@ -185,16 +193,56 @@ slm-assistant-v3/
   looks absent rather than forbidden. Hiding the tab is only the UI half
 - New features default to off, and every toggle records which admin made it
 
-**Recitation practice — phase 1 of 5 (in progress, off by default)**
+**Recitation practice — phases 1–2 of 5 done (off by default)**
 - Goal: recite Quran from memory and get corrected live, hearing the
   correct word played back in the reference reciter's own voice
-- Phase 1 (done): a separate "Recitation" tab to upload reference
-  recitations tagged with surah and optional ayah range, and play them back
-- File type is detected from the **file's bytes** (ID3/MPEG frame sync,
-  RIFF/WAVE, fLaC, OggS, ftyp, EBML), never trusted from the extension or the
-  browser's MIME type; files are stored under generated uuid names
-- Audio is served with HTTP Range support (206 partial content), which
-  seeking needs today and word-level clip playback will rely on later
+- Phase 1: a separate "Recitation" tab to upload reference recitations tagged
+  with surah and optional ayah range. File type is detected from the **file's
+  bytes** (ID3/MPEG frame sync, RIFF/WAVE, fLaC, OggS, ftyp, EBML), never
+  trusted from the extension or browser MIME type; files are stored under
+  generated uuid names and served with HTTP Range support
+- Phase 2: every upload is **aligned to the canonical Quran text**, so each word
+  has a timestamp in the reference audio. The tab shows the vowelled text, and
+  **clicking any word plays exactly that word** in the reciter's voice — the
+  building block live correction will use. No LLM anywhere in this pipeline
+
+How phase 2 works, and the decisions behind it:
+
+- **Pipeline:** upload → BullMQ job (Redis) → Python speech service →
+  word timings in Postgres. Processing takes minutes on a CPU, far too long for
+  an HTTP request, so it's a background job. Bad input (an ayah range the surah
+  doesn't have) fails immediately; transient errors (service down) retry with
+  exponential backoff, then mark the recording FAILED — never stuck "processing"
+- **Model provenance:** third-party pre-converted copies of the model exist but
+  have no documented conversion, so the image converts the **official
+  checkpoint pinned to a commit**, inheriting `openai/whisper-base`'s tuned
+  alignment heads (the fine-tune ships none, and the converter's fallback
+  gives blurrier word timings). Every result records the model revision that
+  produced it
+- **Arabic normalization, verified across the whole Quran:** vowelled and plain
+  editions produce identical match keys for all 78,248 spoken words. Naively
+  stripping marks fails ~22,000 words (hamza seats, dagger alef, tatweel), and
+  standalone pause marks would otherwise count as ~4,600 "missed words"
+- **Alignment:** Needleman–Wunsch with character-similarity substitution
+  costs, banded around the diagonal so a whole surah is O(n·band) rather than
+  O(n²) — a brute-force oracle test proves the band still finds the optimum.
+  Reciters' openings (isti'adha, basmala) are modelled as optional
+  zero-cost words: الرجيم and الرحيم differ by one letter, and without this the
+  isti'adha stole the basmala's timings on a real recording
+- **Tuned on measurements, not guesses** (Mishary Al-Fatiha recording):
+
+  | Change | Words matched |
+  |---|---|
+  | One 30 s window, as faster-whisper does by default | 79.3% — basmala dropped entirely |
+  | faster-whisper's built-in `vad_filter` | no better (it rejoins speech before decoding) |
+  | Decode each pause-separated clip independently | 89.7% |
+  | Group clips up to 15 s + optional preamble + snap word edges to speech | **93.1%** |
+
+  Remaining errors are genuine recognition misses by a small base model on a
+  professional reciter (العالمين heard as العيال) — kept visible, not hidden
+- **Deterministic by design:** temperature 0 with no fallback sampling; with
+  fallback on, a word's result changed between identical runs, which is
+  unacceptable for ground-truth data
 
 **UI**
 - Navy/amber theme (CSS variables in `globals.css`) rather than the default
@@ -211,16 +259,13 @@ slm-assistant-v3/
 
 ## Future features (roadmap)
 
-- **Recitation practice, phases 2–5** — deliberately a deterministic speech
+- **Recitation practice, phases 3–5** — deliberately a deterministic speech
   pipeline, no LLM:
-  - *Phase 2:* a Python (FastAPI) speech service running
-    `tarteel-ai/whisper-base-ar-quran` (Whisper fine-tuned on Quran recitation)
-    via faster-whisper on CPU. It aligns each reference recording to the
-    canonical Quran text, so every word gets a timestamp
   - *Phase 3:* live checking. Streamed mic audio is transcribed in overlapping
     windows (LocalAgreement, from whisper_streaming), words are aligned against
     the expected ayah, and a wrong, missed, or extra word triggers playback of
-    that word's clip from the reference audio. Expect roughly 1–2 s latency on CPU
+    that word's clip from the reference audio. Latency depends heavily on the
+    CPU; see HOW_TO_RUN part M for measured speeds on this machine
   - *Phase 4:* evaluation — word error rate plus mistake-detection
     precision/recall on a labelled set
   - *Phase 5:* LoRA fine-tuning measured against the phase 4 baseline, and an
@@ -247,8 +292,9 @@ slm-assistant-v3/
 ## Tests
 
 ```bash
-cd apps/api && npm test          # 125 tests, ~15s, no Docker or network needed
-npm run test:cov                 # coverage report
+cd apps/api && npm test                      # 163 tests, ~20s, no Docker or network needed
+npm run test:cov                             # coverage report
+docker build --target test services/speech   # 150 Python tests, run inside the service image
 ```
 
 Jest + ts-jest, unit-level, with every external dependency faked — the suite runs
@@ -263,6 +309,22 @@ without Postgres, Redis, Chroma, or a provider API key, so it's CI-ready as-is.
 | `features.spec.ts` | Registry defaults vs. stored overrides, admin attribution, prototype-key rejection (`__proto__`, `constructor`), the guard's 404 and its no-DB path for ungated routes |
 | `audio-format.spec.ts` | Every supported container signature, MP3-vs-AAC frame-sync disambiguation, reserved MPEG version, renamed non-audio files, truncated buffers |
 | `reference-input.spec.ts` | Surah bounds, half-specified and inverted ayah ranges, multipart string parsing, title fallback and length cap |
+| `recitation.processor.spec.ts` | Job lifecycle: PROCESSING → READY in one transaction, low match rate kept but FAILED, permanent errors skip retries, last retry marks FAILED, deletion mid-job isn't an error |
+| `speech-client.service.spec.ts` | Which HTTP failures are retryable (unreachable, 5xx, 408, 429) vs permanent, timeout presence, FastAPI validation-error flattening, non-JSON bodies |
+| `recitation.service.spec.ts` | Every upload is queued; a Redis outage keeps the upload (FAILED with reason); reprocess refuses to race a running job; unfinished work re-queued on boot |
+
+The speech service's pytest suite, in the service image:
+
+| Test file | What it pins down |
+|---|---|
+| `test_normalize.py` | Harakat, dagger alef, tatweel, every alef seat, decomposed vs precomposed input, pause marks and punctuation as non-words |
+| `test_quran.py` | All 6,236 verses, ayah counts, pause marks never counted as words, range validation |
+| `test_align.py` | Missed/substituted/extra words, openings before the text, **a brute-force O(n²) oracle proving the banded search still finds the optimal alignment** (40 randomised cases), a 6,000-word surah |
+| `test_clips.py` | Clip grouping on real VAD output, snapping word edges to speech, ignoring VAD padding |
+| `test_reference.py` | Timing interpolation for unheard words, match rate, **the isti'adha/basmala regression from a real recording** |
+| `test_api.py` | Path traversal rejected before any file access, invalid ranges rejected before transcribing, camelCase response contract |
+
+Both suites were mutation-checked for the regressions they claim to guard: disabling the preamble, narrowing the alignment band, or removing a hamza fold each fails the specific tests named for it.
 
 Three choices worth calling out:
 

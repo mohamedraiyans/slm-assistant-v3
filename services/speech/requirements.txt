@@ -1,0 +1,6 @@
+# Runtime dependencies of the speech service (no torch: inference runs on CTranslate2).
+faster-whisper==1.2.1
+ctranslate2==4.8.2
+fastapi==0.141.1
+uvicorn==0.53.0
+pydantic==2.13.5

@@ -1,5 +1,6 @@
+import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { join } from 'node:path';
 import { HealthModule } from './health/health.module';
 import { AuthModule } from './auth/auth.module';
@@ -22,6 +23,16 @@ import { RecitationModule } from './recitation/recitation.module';
       envFilePath: join(process.cwd(), '..', '..', '.env'),
     }),
     RedisModule,
+    // Background jobs share the Redis instance used by the FAQ cache, resolved from the
+    // same REDIS_URL (BullMQ hands the url straight to ioredis, as RedisModule does).
+    BullModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        connection: {
+          url: config.get<string>('REDIS_URL') ?? 'redis://localhost:6379',
+        },
+      }),
+    }),
     FaqModule,
     PrismaModule,
     HealthModule,
