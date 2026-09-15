@@ -12,6 +12,8 @@ import { EvalModule } from './eval/eval.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
 import { FaqModule } from './faq/faq.module';
+import { FeaturesModule } from './features/features.module';
+import { RecitationModule } from './recitation/recitation.module';
 
 @Module({
   imports: [
@@ -30,6 +32,8 @@ import { FaqModule } from './faq/faq.module';
     QuizModule,
     ProvidersModule,
     EvalModule,
+    FeaturesModule,
+    RecitationModule,
   ],
 })
 export class AppModule {}

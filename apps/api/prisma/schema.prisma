@@ -29,6 +29,46 @@ model User {
   refreshTokens  RefreshToken[]
   providerKeys   ProviderCredential[]
   documents      Document[]
+  featureChanges FeatureFlag[]
+  recitations    RecitationReference[]
+}
+
+// Admin-controlled switches for optional features. A missing row means the
+// feature's registry default applies (see apps/api/src/features/feature-registry.ts).
+model FeatureFlag {
+  key       String   @id
+  enabled   Boolean
+  updatedBy String?
+  updater   User?    @relation(fields: [updatedBy], references: [id], onDelete: SetNull)
+  updatedAt DateTime @updatedAt
+}
+
+enum RecitationStatus {
+  PENDING     // stored, waiting for the speech service
+  PROCESSING  // being transcribed and aligned to the canonical text
+  READY       // word timestamps available, usable for checking
+  FAILED
+}
+
+// A known-correct recitation used as ground truth. The canonical Quran text is the
+// source of truth for *what* is recited; this audio supplies *how* it sounds and the
+// timestamps used to play back the correct word in the reciter's own voice.
+model RecitationReference {
+  id           String           @id @default(uuid())
+  title        String
+  surah        Int
+  ayahStart    Int?             // null together with ayahEnd = the whole surah
+  ayahEnd      Int?
+  storedName   String           @unique // generated on upload; never the client's filename
+  originalName String
+  mimeType     String
+  sizeBytes    Int
+  status       RecitationStatus @default(PENDING)
+  uploadedBy   String?
+  uploader     User?            @relation(fields: [uploadedBy], references: [id], onDelete: SetNull)
+  createdAt    DateTime         @default(now())
+
+  @@index([surah])
 }
 
 model Document {

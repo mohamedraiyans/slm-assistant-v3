@@ -58,6 +58,32 @@ export interface FaqEntry {
   count: number;
 }
 
+export type FeatureKey = "recitation";
+
+export interface FeatureState {
+  key: FeatureKey;
+  label: string;
+  description: string;
+  enabled: boolean;
+}
+
+export type RecitationStatus = "PENDING" | "PROCESSING" | "READY" | "FAILED";
+
+export interface RecitationReferenceSummary {
+  id: string;
+  title: string;
+  surah: number;
+  /** Both null means the whole surah */
+  ayahStart: number | null;
+  ayahEnd: number | null;
+  originalName: string;
+  mimeType: string;
+  sizeBytes: number;
+  status: RecitationStatus;
+  uploadedBy: string | null;
+  createdAt: string;
+}
+
 export interface ProviderUsageWindow {
   limit: number | null;
   remaining: number | null;

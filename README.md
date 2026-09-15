@@ -44,6 +44,9 @@ slm-assistant-v3/
 │   │       ├── chat/              LCEL RAG chain, per-provider chat model factory
 │   │       ├── faq/               Redis-backed answer cache + question frequency ranking
 │   │       ├── redis/             Global module providing the shared ioredis client
+│   │       ├── features/          Admin feature flags + FeatureGuard (404 when off)
+│   │       ├── recitation/        Recitation practice: reference audio upload,
+│   │       │                      byte-level format detection, Range streaming
 │   │       ├── quiz/              Scaffolded — not implemented yet
 │   │       ├── eval/              Scaffolded — not implemented yet
 │   │       └── health/            Health check endpoint
@@ -172,6 +175,27 @@ slm-assistant-v3/
   `ADMIN_EMAILS` address to `ADMIN` on next sign-in, recreating the account
   if needed
 
+**Feature flags (admin)**
+- Optional features are switched on/off by admins from a "Features" dialog,
+  no deploy needed. Flags are declared in a typed code registry, and the
+  database only stores an admin's override, so a mistyped flag name fails to
+  compile rather than silently creating a flag nothing reads
+- Enforced server-side: `@RequireFeature('recitation')` + `FeatureGuard`
+  makes every route of a disabled feature answer **404**, not 403, so it
+  looks absent rather than forbidden. Hiding the tab is only the UI half
+- New features default to off, and every toggle records which admin made it
+
+**Recitation practice — phase 1 of 5 (in progress, off by default)**
+- Goal: recite Quran from memory and get corrected live, hearing the
+  correct word played back in the reference reciter's own voice
+- Phase 1 (done): a separate "Recitation" tab to upload reference
+  recitations tagged with surah and optional ayah range, and play them back
+- File type is detected from the **file's bytes** (ID3/MPEG frame sync,
+  RIFF/WAVE, fLaC, OggS, ftyp, EBML), never trusted from the extension or the
+  browser's MIME type; files are stored under generated uuid names
+- Audio is served with HTTP Range support (206 partial content), which
+  seeking needs today and word-level clip playback will rely on later
+
 **UI**
 - Navy/amber theme (CSS variables in `globals.css`) rather than the default
   shadcn grayscale — the login page shows the full constellation wallpaper in
@@ -186,6 +210,25 @@ slm-assistant-v3/
 - App processes run on the host via Turborepo for fast iteration
 
 ## Future features (roadmap)
+
+- **Recitation practice, phases 2–5** — deliberately a deterministic speech
+  pipeline, no LLM:
+  - *Phase 2:* a Python (FastAPI) speech service running
+    `tarteel-ai/whisper-base-ar-quran` (Whisper fine-tuned on Quran recitation)
+    via faster-whisper on CPU. It aligns each reference recording to the
+    canonical Quran text, so every word gets a timestamp
+  - *Phase 3:* live checking. Streamed mic audio is transcribed in overlapping
+    windows (LocalAgreement, from whisper_streaming), words are aligned against
+    the expected ayah, and a wrong, missed, or extra word triggers playback of
+    that word's clip from the reference audio. Expect roughly 1–2 s latency on CPU
+  - *Phase 4:* evaluation — word error rate plus mistake-detection
+    precision/recall on a labelled set
+  - *Phase 5:* LoRA fine-tuning measured against the phase 4 baseline, and an
+    exam tutor for study material using LangGraph (a stateful
+    listen → check → respond loop), text-to-speech when no reference audio
+    exists, and a concept knowledge graph
+  - Known limit: word-level checking can't judge tajweed (elongation,
+    articulation); that needs phoneme-level models
 
 - **Phase 3 — Kubernetes**: containerize the app itself (currently only
   dependencies run in Docker) and move to local kind/minikube, then a real cluster
@@ -204,7 +247,7 @@ slm-assistant-v3/
 ## Tests
 
 ```bash
-cd apps/api && npm test          # 76 tests, ~11s, no Docker or network needed
+cd apps/api && npm test          # 125 tests, ~15s, no Docker or network needed
 npm run test:cov                 # coverage report
 ```
 
@@ -217,6 +260,9 @@ without Postgres, Redis, Chroma, or a provider API key, so it's CI-ready as-is.
 | `vector-store.service.spec.ts` | The per-file cap: coverage across documents, backfill when only one document is relevant, relevance ordering, distance→similarity scoring |
 | `faq.service.spec.ts` | Question normalization, frequency ranking, per-provider cache isolation, version-bump invalidation, the atomic `SET NX` warm lock |
 | `chat.service.spec.ts` | The RAG pipeline end-to-end: cache-hit short-circuit, empty-answer guard, conversation memory, background warming |
+| `features.spec.ts` | Registry defaults vs. stored overrides, admin attribution, prototype-key rejection (`__proto__`, `constructor`), the guard's 404 and its no-DB path for ungated routes |
+| `audio-format.spec.ts` | Every supported container signature, MP3-vs-AAC frame-sync disambiguation, reserved MPEG version, renamed non-audio files, truncated buffers |
+| `reference-input.spec.ts` | Surah bounds, half-specified and inverted ayah ranges, multipart string parsing, title fallback and length cap |
 
 Three choices worth calling out:
 

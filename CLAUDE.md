@@ -38,6 +38,7 @@ npx turbo run test                   # jest unit suite in apps/api (see Testing 
 
 # Prisma migration after editing apps/api/prisma/schema.prisma
 cd apps/api && npx prisma migrate dev --name describe_your_change
+npx prisma generate                  # Prisma 7: migrate dev no longer does this for you
 ```
 
 **Windows gotcha:** `nest start --watch` occasionally crashes on its own restart cycle
@@ -121,6 +122,17 @@ feature:
   (`apps/api/data/docs/`) and the Chroma vectors are independent — deleting one does not delete the other
   unless you go through `DocumentsService.removeDocument()`, which cleans up both plus bumps the FAQ cache
   version.
+- **`features/`** — admin feature flags. Keys are declared in `feature-registry.ts` (typed `FeatureKey` in
+  shared-types); the `FeatureFlag` table stores only overrides. Gate a controller with
+  `@UseGuards(JwtAuthGuard, FeatureGuard)` + `@RequireFeature('key')` — auth guard first, so anonymous
+  callers get 401 and signed-in callers get 404 when the feature is off. The web hides the tab too, but the
+  guard is the actual switch.
+- **`recitation/`** — recitation practice, phase 1 of 5 (see README roadmap): reference audio upload/list/
+  stream/delete under `/recitation/references`, feature-gated. Audio type comes from `detectAudioFormat`
+  (magic bytes), never the extension or client MIME; files live in `apps/api/data/recitations/` under uuid
+  names; `toSummary` is an explicit allowlist so `storedName` never reaches responses. `status` starts
+  `PENDING` — nothing processes recordings until the planned Python speech service exists. Deliberately no
+  LLM in this pipeline.
 - **`users/`** — admin-only list/delete. `Document.uploadedBy` and `ProviderCredential.createdBy` are
   nullable with `onDelete: SetNull` specifically so deleting a user doesn't cascade-delete shared team
   resources (documents, provider keys) — it just clears the attribution.

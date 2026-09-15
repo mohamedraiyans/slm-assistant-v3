@@ -112,6 +112,12 @@ needed): `docker compose down -v`
 
       cd apps/api
       npx prisma migrate dev --name describe_your_change
+      npx prisma generate
+
+Run BOTH. Since Prisma 7, `migrate dev` no longer regenerates the
+client, so skipping `generate` leaves the database updated but the
+TypeScript types stale ("Property 'yourNewModel' does not exist on
+type 'PrismaService'").
 
 Always glance at the generated migration file in
 apps/api/prisma/migrations/ before trusting it — autogenerate is good
@@ -169,7 +175,7 @@ have added; they never see the raw keys.
 --------------------------------------------------------------------
 
       cd apps/api
-      npm test                  (76 tests, ~15s)
+      npm test                  (125 tests, ~15s)
       npm run test:cov          (adds a coverage report)
 
 Nothing needs to be running first — no Docker, no dev server, no
@@ -177,14 +183,14 @@ network, no provider API key. Every external dependency (Chroma,
 Redis, Postgres, the LLM) is faked, so this works on a cold machine
 and in CI. Specs live next to the code they cover, as *.spec.ts.
 
-Coverage on the four modules under test is 99.5% of statements and
-100% of functions:
-
   document-chunker.spec.ts       chunking: headings, word budget,
                                  overlap, chunk ids, empty input
   vector-store.service.spec.ts   the per-file retrieval cap
   faq.service.spec.ts            Redis cache keys + invalidation
   chat.service.spec.ts           the whole RAG pipeline
+  features.spec.ts               feature flags + the 404 feature guard
+  audio-format.spec.ts           audio type detection from file bytes
+  reference-input.spec.ts        surah / ayah-range validation
 
 Two things to know before you edit a spec:
 
@@ -265,6 +271,9 @@ just become null (see the nullable_user_owner_fks migration). Deleting
 an ADMIN isn't permanent either: they're re-promoted automatically the
 next time they sign in with Google, per the ADMIN_EMAILS allowlist.
 
+Also on the dashboard for admins: "Features" - on/off switches for
+optional features, currently just Recitation practice (see PART M).
+
 --------------------------------------------------------------------
  PART L - KNOWN GOTCHAS HIT DURING DEVELOPMENT (fixed, but good to know)
 --------------------------------------------------------------------
@@ -299,13 +308,40 @@ next time they sign in with Google, per the ADMIN_EMAILS allowlist.
   folder the watcher depends on and can trigger this same crash.
 
 --------------------------------------------------------------------
+ PART M - RECITATION PRACTICE (optional feature, OFF by default)
+--------------------------------------------------------------------
+
+Status: phase 1 of 5 - you can upload and play reference recitations.
+Checking your own recitation comes in the later phases (see README
+roadmap).
+
+Turn it on: sign in as ADMIN -> "Features" -> switch on "Recitation
+practice". An "Assistant | Recitation" switcher then appears in the
+header for everyone. Switching it off hides the tab AND makes the api
+answer 404 on every /recitation route - the toggle is enforced on the
+server, not just in the UI.
+
+Upload: pick an audio file (MP3, WAV, FLAC, OGG/Opus, M4A, AAC, WebM,
+up to 100 MB), the surah number, and optionally an ayah range. Any
+signed-in user can upload; only admins can delete.
+
+Worth knowing:
+- The file type is detected from the file's bytes, not its extension,
+  so a renamed PDF is rejected even if it's called "quran.mp3".
+- Files are stored at apps/api/data/recitations/ under generated uuid
+  names (the original filename is kept only for display). That folder
+  is gitignored and excluded from the api watcher, like data/docs/.
+- New uploads show "Waiting for processing" - that's expected until
+  the speech service (phase 2) exists to process them.
+
+--------------------------------------------------------------------
  QUICK REFERENCE - command-only cheat sheet
 --------------------------------------------------------------------
 
   Start everything:         docker compose up -d && npx turbo run dev
   Stop data services:       docker compose stop
   Wipe DB + vectors:        docker compose down -v
-  Run a migration:          cd apps/api && npx prisma migrate dev
+  Run a migration:          cd apps/api && npx prisma migrate dev && npx prisma generate
   Type-check api:           cd apps/api && npx tsc --noEmit
                              (avoid `npx nest build` while --watch is
                              running — see Part L gotchas)
