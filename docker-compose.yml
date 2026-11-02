@@ -69,6 +69,22 @@ services:
       # The api (running on the host) writes uploads here; the service only reads them.
       - ./apps/api/data/recitations:/data/recitations:ro
 
+  # Knowledge graph for GraphRAG. Heap/page cache are capped hard so it stays well under
+  # 1 GB on a small laptop (Neo4j's defaults size themselves off total RAM).
+  neo4j:
+    image: neo4j:5-community
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: neo4j/slmgraph123
+      NEO4J_server_memory_heap_initial__size: 256m
+      NEO4J_server_memory_heap_max__size: 384m
+      NEO4J_server_memory_pagecache_size: 128m
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4j-data:/data
+
   adminer:
     image: adminer:latest
     restart: unless-stopped
@@ -81,3 +97,4 @@ volumes:
   postgres-data:
   redis-data:
   chroma-data:
+  neo4j-data:

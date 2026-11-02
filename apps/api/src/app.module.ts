@@ -14,6 +14,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
 import { FaqModule } from './faq/faq.module';
 import { FeaturesModule } from './features/features.module';
+import { GraphModule } from './graph/graph.module';
 import { RecitationModule } from './recitation/recitation.module';
 
 @Module({
@@ -45,6 +46,7 @@ import { RecitationModule } from './recitation/recitation.module';
     EvalModule,
     FeaturesModule,
     RecitationModule,
+    GraphModule,
   ],
 })
 export class AppModule {}

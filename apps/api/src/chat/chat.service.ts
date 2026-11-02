@@ -10,6 +10,7 @@ import {
 } from '../documents/knowledge-base-retriever';
 import type { VectorMatch } from '../documents/vector-store.service';
 import { FaqService } from '../faq/faq.service';
+import { GraphService } from '../graph/graph.service';
 import { ProvidersService } from '../providers/providers.service';
 import { MemoryService } from './memory.service';
 import { ProviderFactory } from './provider-factory.service';
@@ -21,7 +22,7 @@ const SYSTEM_PROMPT =
 
 const promptTemplate = ChatPromptTemplate.fromMessages([
   ['system', SYSTEM_PROMPT],
-  ['human', 'Context:\n{context}\n\nQuestion: {question}'],
+  ['human', 'Context:\n{context}{graph}\n\nQuestion: {question}'],
 ]);
 
 function formatDocuments(docs: Document<KnowledgeBaseDocMetadata>[]): string {
@@ -62,6 +63,7 @@ export class ChatService {
     private readonly memory: MemoryService,
     private readonly faq: FaqService,
     private readonly providers: ProvidersService,
+    private readonly graph: GraphService,
   ) {}
 
   async handleChat(userId: string, question: string, provider: ProviderName): Promise<ChatResult> {
@@ -91,10 +93,19 @@ export class ChatService {
     question: string,
     provider: ProviderName,
   ): Promise<{ answer: string; sources: VectorMatch[] }> {
-    const docs = await this.retriever.invoke(question);
+    const [docs, graphFacts] = await Promise.all([
+      this.retriever.invoke(question),
+      this.graph.factsFor(question),
+    ]);
     const model = await this.providerFactory.build(provider);
     const chain = RunnableSequence.from([promptTemplate, model, new StringOutputParser()]);
-    const answer = await chain.invoke({ context: formatDocuments(docs), question });
+    const answer = await chain.invoke({
+      context: formatDocuments(docs),
+      graph: graphFacts.length
+        ? `\n\nKnown relationships from the knowledge graph:\n${graphFacts.join('\n')}`
+        : '',
+      question,
+    });
 
     if (!answer.trim()) {
       // Don't cache or persist a blank reply — an empty LLM response is a

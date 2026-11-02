@@ -1,0 +1,15 @@
+Team Directory
+
+Sara Ahmed works at Northwind Analytics as a Senior Data Engineer.
+Sara Ahmed leads the Orion Data Platform project.
+Daniel Reyes works at Northwind Analytics as a Machine Learning Engineer.
+Daniel Reyes built the Recommendation Engine project.
+Priya Nair works at Contoso Logistics as a Product Manager.
+Priya Nair manages the Fleet Tracker project.
+Marcus Lindqvist works at Contoso Logistics as a Backend Developer.
+Marcus Lindqvist built the Fleet Tracker project.
+Elena Petrova works at Fabrikam Health as a Software Architect.
+Elena Petrova designed the Patient Portal project.
+Northwind Analytics is headquartered in Stockholm.
+Contoso Logistics is headquartered in Rotterdam.
+Fabrikam Health is headquartered in Berlin.

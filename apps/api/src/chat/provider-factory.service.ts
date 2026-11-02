@@ -26,7 +26,12 @@ export class ProviderFactory {
     };
   }
 
-  async build(provider: ProviderName): Promise<BaseChatModel> {
+  /**
+   * `maxTokens` defaults to chat-answer size. Callers needing structured output must raise
+   * it: reasoning models (e.g. gpt-oss) spend this budget on thinking first, and a small
+   * cap leaves the visible reply empty.
+   */
+  async build(provider: ProviderName, maxTokens = 512): Promise<BaseChatModel> {
     const credential = await this.providersService.getDecryptedActiveCredential(provider);
     if (!credential) {
       throw new NotFoundException(
@@ -40,7 +45,7 @@ export class ProviderFactory {
           apiKey: credential.apiKey,
           model: (credential.extraConfig?.model as string) ?? 'openai/gpt-oss-120b',
           temperature: 0.3,
-          maxTokens: 512,
+          maxTokens,
           fetch: this.usageTrackingFetch(provider),
         });
       case 'AZURE_OPENAI':
@@ -50,7 +55,7 @@ export class ProviderFactory {
           azureOpenAIApiDeploymentName: credential.extraConfig?.deploymentName as string,
           azureOpenAIApiVersion: (credential.extraConfig?.apiVersion as string) ?? '2024-10-21',
           temperature: 0.3,
-          maxTokens: 512,
+          maxTokens,
           configuration: { fetch: this.usageTrackingFetch(provider) },
         });
       case 'ANTHROPIC':
@@ -58,7 +63,7 @@ export class ProviderFactory {
           apiKey: credential.apiKey,
           model: (credential.extraConfig?.model as string) ?? 'claude-3-5-haiku-latest',
           temperature: 0.3,
-          maxTokens: 512,
+          maxTokens,
           clientOptions: { fetch: this.usageTrackingFetch(provider) },
         });
       default:

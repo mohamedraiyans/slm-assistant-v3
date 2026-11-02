@@ -2,6 +2,8 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { FaqService } from '../faq/faq.service';
+import { GraphExtractorService } from '../graph/graph-extractor.service';
+import { GraphService } from '../graph/graph.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { chunkDocument } from './document-chunker';
 import { extractText, SUPPORTED_EXTENSIONS } from './document-extractor';
@@ -15,6 +17,8 @@ export class DocumentsService {
     private readonly prisma: PrismaService,
     private readonly vectorStore: VectorStoreService,
     private readonly faq: FaqService,
+    private readonly graph: GraphService,
+    private readonly graphExtractor: GraphExtractorService,
   ) {}
 
   async listDocuments() {
@@ -43,6 +47,8 @@ export class DocumentsService {
       await this.vectorStore.deleteDocument(filename);
       await this.vectorStore.addChunks(chunks);
       await this.faq.invalidateAll();
+      // Fire-and-forget: extraction is one LLM call per few chunks, too slow to block the upload.
+      void this.graphExtractor.indexDocument(filename, chunks);
 
       return this.prisma.document.upsert({
         where: { filename },
@@ -60,6 +66,7 @@ export class DocumentsService {
     const destPath = join(DOCS_DIR, filename);
     await unlink(destPath).catch(() => undefined);
     await this.vectorStore.deleteDocument(filename);
+    await this.graph.deleteDocument(filename);
     await this.prisma.document.deleteMany({ where: { filename } });
     await this.faq.invalidateAll();
   }

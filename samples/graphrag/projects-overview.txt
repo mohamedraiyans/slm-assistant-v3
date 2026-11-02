@@ -1,0 +1,11 @@
+Projects Overview
+
+Orion Data Platform is a data warehouse project delivered for Contoso Logistics by Northwind Analytics.
+Orion Data Platform uses Apache Kafka and PostgreSQL.
+Recommendation Engine is a project for Fabrikam Health that suggests care plans to patients.
+Recommendation Engine uses Python and PyTorch.
+Fleet Tracker is a real-time vehicle tracking project owned by Contoso Logistics.
+Fleet Tracker uses Redis and Node.js.
+Patient Portal is a web project for Fabrikam Health.
+Patient Portal uses React and Node.js.
+Northwind Analytics partnered with Fabrikam Health on the Recommendation Engine.

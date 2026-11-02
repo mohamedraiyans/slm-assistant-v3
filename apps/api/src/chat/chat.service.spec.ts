@@ -9,6 +9,7 @@ import {
   type KnowledgeBaseDocMetadata,
 } from '../documents/knowledge-base-retriever';
 import { FaqService } from '../faq/faq.service';
+import { GraphService } from '../graph/graph.service';
 import { ProvidersService } from '../providers/providers.service';
 import { ChatService } from './chat.service';
 import { MemoryService } from './memory.service';
@@ -87,6 +88,7 @@ describe('ChatService', () => {
         { provide: ProviderFactory, useValue: providerFactory },
         { provide: FaqService, useValue: faq },
         { provide: ProvidersService, useValue: providers },
+        { provide: GraphService, useValue: { factsFor: jest.fn().mockResolvedValue([]) } },
       ],
     }).compile();
 

@@ -1,12 +1,13 @@
 import { Module } from '@nestjs/common';
 import { FaqModule } from '../faq/faq.module';
+import { GraphModule } from '../graph/graph.module';
 import { DocumentsController } from './documents.controller';
 import { DocumentsService } from './documents.service';
 import { KnowledgeBaseRetriever } from './knowledge-base-retriever';
 import { VectorStoreService } from './vector-store.service';
 
 @Module({
-  imports: [FaqModule],
+  imports: [FaqModule, GraphModule],
   controllers: [DocumentsController],
   providers: [DocumentsService, VectorStoreService, KnowledgeBaseRetriever],
   exports: [VectorStoreService, KnowledgeBaseRetriever],

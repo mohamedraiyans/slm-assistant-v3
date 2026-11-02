@@ -18,6 +18,7 @@ multi-tenant architecture with proper auth, RBAC, and a real vector store.
 | Frontend | Next.js 16 (App Router), React 19, Tailwind CSS 4, shadcn/base-ui |
 | Database | PostgreSQL |
 | Vector store | Chroma (cosine similarity / HNSW) |
+| Knowledge graph | Neo4j 5 (Cypher, `neo4j-driver`) — optional GraphRAG layer, see below |
 | Embeddings | Local, via `@huggingface/transformers` (Xenova/all-MiniLM-L6-v2) — never leaves the machine |
 | RAG / LLM orchestration | LangChain (`@langchain/core`) — multi-provider `BaseChatModel`s (Groq, Azure OpenAI, Anthropic), a custom `BaseRetriever` over Chroma, and an LCEL generation chain (`ChatPromptTemplate → model → StringOutputParser`) |
 | Cache | Redis (`ioredis`) — FAQ answer cache + frequency ranking, see below |
@@ -26,7 +27,7 @@ multi-tenant architecture with proper auth, RBAC, and a real vector store.
 | Document parsing | `pdf-parse`, `mammoth` (DOCX) |
 | Speech recognition | Python FastAPI service: `faster-whisper` (CTranslate2, int8, CPU) running `tarteel-ai/whisper-base-ar-quran`, converted from the pinned official checkpoint at image build time |
 | Background jobs | BullMQ on the existing Redis — retries with backoff, permanent-vs-transient failure handling |
-| Infra (local dev) | Docker Compose — Postgres, Redis, Chroma, Adminer, speech service |
+| Infra (local dev) | Docker Compose — Postgres, Redis, Chroma, Neo4j, Adminer, speech service |
 
 ## Project structure
 
@@ -44,6 +45,8 @@ slm-assistant-v3/
 │   │       ├── documents/         Upload, parsing, chunking, Chroma vector store,
 │   │       │                      KnowledgeBaseRetriever (LangChain BaseRetriever)
 │   │       ├── chat/              LCEL RAG chain, per-provider chat model factory
+│   │       ├── graph/             GraphRAG: LLM entity extraction, Neo4j store,
+│   │       │                      two-hop lookup, GET /graph + /graph/facts
 │   │       ├── faq/               Redis-backed answer cache + question frequency ranking
 │   │       ├── redis/             Global module providing the shared ioredis client
 │   │       ├── features/          Admin feature flags + FeatureGuard (404 when off)
@@ -74,7 +77,8 @@ slm-assistant-v3/
 │       │                            conversion, Arabic normalization, Quran text,
 │       │                            banded word alignment, pytest suite
 │       └── data/quran-simple.txt   Tanzil Quran text (verbatim, CC BY 3.0)
-├── docker-compose.yml               Postgres, Redis, Chroma, Adminer, speech
+├── samples/graphrag/               Two small linked documents for trying GraphRAG
+├── docker-compose.yml               Postgres, Redis, Chroma, Neo4j, Adminer, speech
 ├── CLAUDE.md                        Commands + architecture map for Claude Code
 └── HOW_TO_RUN.txt                   Full local setup + troubleshooting guide
 ```
@@ -119,6 +123,78 @@ slm-assistant-v3/
   of coverage — with three documents uploaded, the one most densely on-topic won
   *all 8* slots and the other two never reached the LLM at all, so questions
   spanning documents silently answered from just one of them.)
+
+**Knowledge graph (GraphRAG, optional)**
+- Vector search finds passages that *sound like* the question; it can't follow
+  relationships. When the answer is a chain spread over several documents (person →
+  project → client → city) each chunk holds one link and none holds the chain. A Neo4j
+  graph of entities and relationships fills that gap, and its facts are added to the
+  same prompt as the retrieved chunks
+- **Indexing:** after an upload returns, `GraphExtractorService` runs in the background.
+  It sends the chunks to the first active LLM provider three at a time and asks for JSON
+  triples (`subject, predicate, object` plus entity types). Entities are merged by
+  lowercase name; the predicate becomes the relationship type (`WORKS_AT`, `USES`);
+  every relationship stores the `source` file it came from
+- **Querying:** `GraphService.factsFor()` finds entities whose name appears in the
+  question and walks up to two hops from them (capped at 25 facts). `ChatService` runs
+  this in parallel with vector retrieval and adds the result to the prompt under
+  "Known relationships from the knowledge graph"
+- **Cleanup:** deleting or re-uploading a document removes exactly the relationships
+  with that `source`, then any entity left with no relationships
+- **Optional by design:** with `NEO4J_URI` unset, or Neo4j unreachable, every graph call
+  returns nothing and the assistant behaves as plain RAG
+- **LLM output is untrusted:** Cypher can't parameterise a relationship type, so the
+  predicate is reduced to `A-Z`, digits and `_` before it is placed in a query
+  (`toRelType`, covered by a unit test with an injection attempt)
+- **Extraction gets its own token budget (4096).** Chat answers use 512, which a
+  reasoning model such as `openai/gpt-oss-120b` spends entirely on thinking, leaving an
+  empty reply and silently extracting 0 facts. A batch that yields no facts now logs the
+  start of the reply
+- Neo4j's heap (256–384 MB) and page cache (128 MB) are capped in `docker-compose.yml`;
+  its defaults size themselves from total RAM, which is too much on a small laptop
+
+Try it: upload the two files in `samples/graphrag/`, wait about a minute (the api log says
+`Graph indexed <file>: N facts via <PROVIDER>`), then open Neo4j Browser.
+
+```
+http://localhost:7474          log in with NEO4J_USER / NEO4J_PASSWORD from .env
+http://localhost:4000/graph    all nodes and links as JSON (signed in)
+http://localhost:4000/graph/facts?q=Orion Data Platform
+                               what the graph step would add for a question, no LLM call
+```
+
+**Reading the graph in Neo4j Browser (Cypher)**
+
+```cypher
+MATCH (a)-[r]->(b) RETURN a,b,r
+```
+
+- `(a)` is any node, which could be a person, company or project
+- `-[r]->` is a relationship (an arrow) going from `a` to something else, and `r` is the
+  name for that arrow
+- `(b)` is the node the arrow points to
+- `MATCH` says "find every place in the graph with this shape"
+- `RETURN a,b,r` says "give me those nodes and arrows back"; Neo4j Browser draws them
+  as circles and lines
+
+The graph is one shared graph, not one per file: after uploading another document, run
+the same query again and its entities appear alongside the existing ones. To see nodes
+by name, click the `Entity` label in the right-hand panel and set the caption to `name`.
+
+| What you want | Query |
+|---|---|
+| One file's facts only | `MATCH (a)-[r {source:'team-directory.txt'}]->(b) RETURN a,b,r` |
+| Everything around one entity | `MATCH (a:Entity {name:'Orion Data Platform'})-[r]-(b) RETURN a,b,r` |
+| Two hops around one entity | `MATCH p=(a:Entity {name:'Orion Data Platform'})-[*1..2]-(b) RETURN p` |
+| Readable table | `MATCH (a)-[r]->(b) RETURN a.name, type(r), b.name, r.source` |
+| Count entities | `MATCH (n:Entity) RETURN count(n)` |
+| Wipe the graph (destructive) | `MATCH (n) DETACH DELETE n` |
+
+Known limits: entity matching is by exact name inside the question, so "Sara" does not
+match "Sara Ahmed" (needs entity resolution); extraction quality depends on the LLM, there
+is no fixed schema, and the model occasionally invents a node such as "patients"; there is
+no graph screen in the web app and no evaluation yet comparing answers with and without
+the graph.
 
 **Chat**
 - Retrieval goes through `KnowledgeBaseRetriever`, a real LangChain
@@ -289,7 +365,7 @@ Phase 3 — **practice: recite an ayah, get corrected in the reciter's voice**:
   instead of rendering the browser's light-mode default
 
 **Infra**
-- Dockerized local dependencies (Postgres, Redis, Chroma, Adminer)
+- Dockerized local dependencies (Postgres, Redis, Chroma, Neo4j, Adminer)
 - App processes run on the host via Turborepo for fast iteration
 
 ## Future features (roadmap)
@@ -309,6 +385,9 @@ Phase 3 — **practice: recite an ayah, get corrected in the reciter's voice**:
   - Known limit: word-level checking can't judge tajweed (elongation,
     articulation); that needs phoneme-level models
 
+- **GraphRAG, next steps**: entity resolution (merge aliases and spelling variants),
+  a fixed schema of allowed entity and relationship types, an evaluation set comparing
+  answers with and without the graph, and a graph view in the web app
 - **Phase 3 — Kubernetes**: containerize the app itself (currently only
   dependencies run in Docker) and move to local kind/minikube, then a real cluster
 - **Phase 4 — Quiz/Exam feature**: generate quizzes from uploaded documents
@@ -326,7 +405,7 @@ Phase 3 — **practice: recite an ayah, get corrected in the reciter's voice**:
 ## Tests
 
 ```bash
-cd apps/api && npm test                      # 192 tests, ~20s, no Docker or network needed
+cd apps/api && npm test                      # 195 tests, ~20s, no Docker or network needed
 npm run test:cov                             # coverage report
 docker build --target test services/speech   # 170 Python tests, run inside the service image
 ```
@@ -340,6 +419,7 @@ without Postgres, Redis, Chroma, or a provider API key, so it's CI-ready as-is.
 | `vector-store.service.spec.ts` | The per-file cap: coverage across documents, backfill when only one document is relevant, relevance ordering, distance→similarity scoring |
 | `faq.service.spec.ts` | Question normalization, frequency ranking, per-provider cache isolation, version-bump invalidation, the atomic `SET NX` warm lock |
 | `chat.service.spec.ts` | The RAG pipeline end-to-end: cache-hit short-circuit, empty-answer guard, conversation memory, background warming |
+| `graph.spec.ts` | Relationship-type sanitising (an injection attempt becomes a harmless name), entity key normalisation, triple parsing from fenced/prose replies and dropping malformed items |
 | `features.spec.ts` | Registry defaults vs. stored overrides, admin attribution, prototype-key rejection (`__proto__`, `constructor`), the guard's 404 and its no-DB path for ungated routes |
 | `audio-format.spec.ts` | Every supported container signature, MP3-vs-AAC frame-sync disambiguation, reserved MPEG version, renamed non-audio files, truncated buffers |
 | `reference-input.spec.ts` | Surah bounds, half-specified and inverted ayah ranges, multipart string parsing, title fallback and length cap |
@@ -389,6 +469,6 @@ See [`HOW_TO_RUN.txt`](./HOW_TO_RUN.txt) for full local setup, environment
 variables, and troubleshooting. Quick reference:
 
 ```bash
-docker compose up -d          # Postgres, Redis, Chroma, Adminer
+docker compose up -d          # Postgres, Redis, Chroma, Neo4j, Adminer
 npx turbo run dev             # api (:4000) + web (:3000)
 ```

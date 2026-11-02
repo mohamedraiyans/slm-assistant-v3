@@ -14,6 +14,8 @@ This project currently has these pieces:
                   runs inside Docker)                   -> http://localhost:8001
   6. Backend     (NestJS, TypeScript)          -> http://localhost:4000
   7. Frontend    (Next.js App Router)          -> http://localhost:3000
+  8. Neo4j       (knowledge graph for GraphRAG, optional, runs inside
+                  Docker)                       -> http://localhost:7474
 
 Both the backend and frontend run on your host machine via Turborepo
 (`turbo dev`), NOT inside Docker. Only the five services above run in
@@ -444,6 +446,9 @@ Run its tests (inside Docker, ~1 min):
   API:                      http://localhost:4000
   API health check:         http://localhost:4000/health
   Chroma:                   http://localhost:8000
+  Neo4j Browser (graph):    http://localhost:7474  (login: NEO4J_USER / NEO4J_PASSWORD in .env)
+  Show the whole graph:     MATCH (a)-[r]->(b) RETURN a,b,r
+  Graph facts for a query:  http://localhost:4000/graph/facts?q=<entity name>  (signed in)
   Speech service health:    http://localhost:8001/health
   Speech service tests:     docker build --target test services/speech
   Adminer (DB browser):     http://localhost:8081
